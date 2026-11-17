@@ -11,9 +11,15 @@ const instanceContext = require("../lib/instance.js");
 // A lista é FECHADA. Uma rota `/auth/:provedor/...` aceitaria qualquer palavra e
 // procuraria um modelo que não existe — 500 em vez de 404, e um log que fala de
 // `undefined` em vez de dizer que ninguém pediu aquele provedor.
+//
+// `volta: "post"` é a Apple: pedindo nome e e-mail, ela exige `form_post` e
+// devolve a pessoa com um FORMULÁRIO, não com uma URL. Os dados chegam no
+// corpo, e o callback dela é registrado como POST — um GET ali seria uma porta
+// que ela nunca usa.
 const PROVEDORES = [
   { nome: "google", api: "oauthGoogle" },
   { nome: "facebook", api: "oauthFacebook" },
+  { nome: "apple", api: "oauthApple", volta: "post" },
 ];
 
 module.exports = function (app) {
@@ -49,17 +55,19 @@ module.exports = function (app) {
       }
     }
 
-    // `apple` ainda não existe — nem o app no provedor, nem rota aqui. Fica
-    // declarado como FALSO em vez de ausente para o app não ter de adivinhar a
-    // forma da resposta quando ele chegar: o botão nasce escondido e acende
-    // sozinho no dia em que a chave entrar, sem build novo.
-    res.send({ ...saida, apple: false });
+    // A Apple chegou em 16/11/2026 e entrou na lista como os outros: sem chave
+    // na central ela responde FALSO, e o botão nasce escondido.
+    res.send(saida);
   });
 
   for (const provedor of PROVEDORES) registrar(app, provedor);
 };
 
-function registrar(app, { nome, api }) {
+function registrar(app, { nome, api, volta = "get" }) {
+  // De onde vêm `state`, `code` e `error`: da URL, ou do corpo do formulário
+  // que a Apple posta. É a ÚNICA diferença da volta entre os provedores.
+  const dadosDaVolta = (req) => (volta === "post" ? req.body : req.query) || {};
+
   // ── A IDA ───────────────────────────────────────────────────────────────
   //
   // Devolve um LINK, e não um 302: quem chama é a tela de entrada por XHR, e um
@@ -126,7 +134,7 @@ function registrar(app, { nome, api }) {
   // enviado ao servidor, então o token não entra em log de acesso, não vai no
   // `Referer` para terceiros e não fica em cache de proxy.
   //
-  // No app nativo, no ESQUEMA próprio (`gofitnow://entrar?sessao=…`), porque um
+  // No app nativo, no ESQUEMA próprio (`vafit://entrar?sessao=…`), porque um
   // app não tem página onde aterrissar — e no iOS é só ao ver esse esquema que o
   // navegador de autenticação devolve o controle ao app.
   //
@@ -139,7 +147,8 @@ function registrar(app, { nome, api }) {
   // isenção em `lib/instanceGate.js`, a resposta seria 400 `no_instance` DEPOIS
   // de a pessoa já ter consentido. A instância sai do bilhete, que é o único
   // lugar confiável: foi este servidor que a gravou lá na ida, já conferida.
-  app.get(`/auth/${nome}/callback`, async function (req, res) {
+  app[volta](`/auth/${nome}/callback`, async function (req, res) {
+    const dados = dadosDaVolta(req);
     const paraLogin = (estado, chave) =>
       // `erroLogin`, e não `erroGoogle`: a chave nasceu quando só havia um
       // provedor, e um erro do Facebook chegando como "erroGoogle" mandaria quem
@@ -156,7 +165,7 @@ function registrar(app, { nome, api }) {
       //
       // `consumirEstado` filtra pelo PROVEDOR: os dois callbacks são públicos, e
       // trocar o `state` de um pelo do outro é a primeira coisa que alguém tenta.
-      const estado = await app.api[api].consumirEstado(req.query.state);
+      const estado = await app.api[api].consumirEstado(dados.state);
       if (!estado) {
         console.error(`[oauth:${nome}] volta sem bilhete válido`);
         return paraLogin(semRumo, "expirou");
@@ -164,14 +173,14 @@ function registrar(app, { nome, api }) {
 
       // Quem clicou em "cancelar" na tela do provedor. Não é falha nossa e não
       // merece mensagem de erro — merece a tela de entrada de volta, quieta.
-      if (req.query.error) return paraLogin(estado, "recusado");
+      if (dados.error) return paraLogin(estado, "recusado");
 
-      if (!req.query.code) return paraLogin(estado, "falhou");
+      if (!dados.code) return paraLogin(estado, "falhou");
 
       const chaves = await app.api[api].chaves();
       if (!chaves.ligado) return paraLogin(estado, "desligado");
 
-      const pessoa = await app.api[api].pessoaDoCodigo(req.query.code, chaves);
+      const pessoa = await app.api[api].pessoaDoCodigo(dados.code, chaves);
       if (pessoa.erro) {
         // O motivo vai para o log e NÃO para a tela: "e-mail não verificado" e
         // "token de outro app" contam a quem tentar em qual pedra ele tropeçou.
@@ -185,17 +194,28 @@ function registrar(app, { nome, api }) {
       // requisição — porque a requisição do provedor não tem como carregá-la.
       const entrada = await instanceContext.run(estado.instancia, async () => {
         const user = await app.api.user.porEmailVerificado(pessoa.email);
-        if (!user) return null;
+        if (!user) {
+          // O Google JÁ provou que o e-mail é dela: dá para dizer o porquê
+          // (bloqueado, desativado) em vez de "sem conta" — ver
+          // `motivoDoEmailVerificado`.
+          return { recusa: await app.api.user.motivoDoEmailVerificado(pessoa.email) };
+        }
         return { user, token: await app.api.auth.registerToken(user._id) };
       });
 
-      if (!entrada) {
+      if (entrada?.recusa) return paraLogin(estado, entrada.recusa);
+
+      if (!entrada?.user) {
         // E-mail sem conta nesta instância. NÃO criamos ninguém aqui — ver
         // `porEmailVerificado`. A tela diz o que fazer; o log diz quem tentou.
         console.error(
           `[oauth:${nome}] sem conta para ${pessoa.email} em ${estado.instancia || "(portal)"}`
         );
-        return paraLogin(estado, "sem_conta");
+        // "Ocultar meu e-mail", na Apple: o endereço é de repasse e nunca é o de
+        // conta nenhuma. "Sem conta" seria mentira — a conta pode existir, com
+        // o e-mail de verdade. A tela diz o caminho: compartilhar o e-mail, ou
+        // entrar com e-mail e senha.
+        return paraLogin(estado, pessoa.oculto ? "email_oculto" : "sem_conta");
       }
 
       // O mesmo registro que o login por senha faz, com o meio anotado: sem

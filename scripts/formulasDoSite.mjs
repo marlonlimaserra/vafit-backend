@@ -19,7 +19,7 @@
 // diferentes para a mesma dobra — sem erro, sem log, e a conta certa
 // indistinguível da errada.
 //
-// O app já resolveu isso do mesmo jeito (`gofitnow-expo/scripts/formulasDoSite.mjs`):
+// O app já resolveu isso do mesmo jeito (`vafit-expo/scripts/formulasDoSite.mjs`):
 // o site é a fonte, este script copia, e um teste quebra se divergirem.
 //
 // ── E por que isto só é possível desde 28/08/2026 ─────────────────────────
@@ -35,7 +35,7 @@ import { fileURLToPath } from "node:url";
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
 const DO_SITE = path.join(
-  AQUI, "..", "..", "gofitnow-frontend", "src", "views", "student", "assessments"
+  AQUI, "..", "..", "vafit-frontend", "src", "views", "student", "assessments"
 );
 
 // `.mjs` e não `.js`: o `package.json` daqui não declara `type: module`, então um
@@ -57,7 +57,7 @@ if (!fs.existsSync(DO_SITE)) {
 const AVISO = `// ⚠️  ARQUIVO ESPELHADO — NÃO EDITE AQUI.
 //
 // A fonte é o site:
-//   gofitnow-frontend/src/views/student/assessments/calculos.js
+//   vafit-frontend/src/views/student/assessments/calculos.js
 //
 // Cópia byte a byte, feita por \`node scripts/formulasDoSite.mjs\`, e há teste
 // (test/lib/formulasEspelhadas.test.js) que quebra se os dois divergirem.

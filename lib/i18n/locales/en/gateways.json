@@ -1,0 +1,21 @@
+{
+  "errors": {
+    "gatewayUnknown": "That payment gateway does not exist",
+    "gatewayNoKey": "Paste the gateway's API key",
+    "gatewayBadKey": "The gateway rejected that key. Check that you copied all of it.",
+    "gatewayWrongKeyType": "That is the public key (pk_), which only tokenizes cards. The integration needs the secret key (sk_) — create one on the same screen.",
+    "gatewayUnreachable": "We could not reach the gateway right now. The key may well be fine — try again in a moment.",
+    "gatewayNotSet": "Set this gateway up before choosing it",
+    "gatewayNoTokenize": "That gateway does not store cards",
+    "cardNoPerson": "That person does not exist",
+    "cardNotFound": "That card is no longer stored",
+    "cardNoGateway": "This person's unit has no gateway that can store cards",
+    "cardNoTokenization": "The gateway account does not have card tokenization enabled yet. Ask their support for it and tick the box in Settings › Payment gateways.",
+    "cardNoDocument": "Enter the holder's tax ID — the gateway requires it to store the card",
+    "cardHolderIncomplete": "The gateway requires the holder's name, email, tax ID, phone, postal code and address number",
+    "cardBadDocument": "The holder's tax ID must have 11 digits (or 14 for a company)",
+    "cardBadZip": "The holder's postal code must have 8 digits",
+    "cardIncomplete": "Some card details are missing",
+    "cardRefused": "The gateway did not store that card."
+  }
+}

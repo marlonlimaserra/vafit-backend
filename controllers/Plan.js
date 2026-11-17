@@ -15,7 +15,7 @@ const { enderecoDaInstancia } = require("../lib/enderecoDaInstancia.js");
 // selo. Juntá-las mandaria a vitrine inteira em toda abertura.
 module.exports = function (app) {
   // A Stripe é rede, e rede não entra em teste. Mesmo arranjo do painel
-  // (`gofitnow-center-backend/controllers/Plan.js`): em produção `app.stripe`
+  // (`vafit-center-backend/controllers/Plan.js`): em produção `app.stripe`
   // não existe e vale o módulo de verdade; no teste ele é posto e a chamada
   // nunca sai da máquina.
   const stripe = app.stripe || stripeReal;

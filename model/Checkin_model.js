@@ -1,4 +1,5 @@
 const { ObjectId } = require("mongodb");
+const lenteDeUnidade = require("../lib/lenteDeUnidade.js");
 
 // A ENTRADA NA ACADEMIA — quem passou pela porta, e quando.
 //
@@ -58,7 +59,7 @@ Checkin_model.prototype.registrar = async function (pessoa, opcoes = {}) {
   // catraca. A rota devolve 200 e a tela não mostra nada — de propósito.
   const recente = await col.findOne(
     { person: new ObjectId(pessoa), em: { $gte: desde, $lte: agora } },
-    { projection: { _id: 1, em: 1 } }
+    { projection: { _id: 1, em: 1 } },
   );
 
   if (recente) return { ok: true, repetido: true, id: String(recente._id), em: recente.em };
@@ -68,7 +69,9 @@ Checkin_model.prototype.registrar = async function (pessoa, opcoes = {}) {
     em: agora,
     origem: ORIGENS.includes(String(opcoes.origem)) ? String(opcoes.origem) : "balcao",
     unit: ObjectId.isValid(opcoes.unit) ? new ObjectId(String(opcoes.unit)) : null,
-    dispositivo: String(opcoes.dispositivo || "").trim().slice(0, 80),
+    dispositivo: String(opcoes.dispositivo || "")
+      .trim()
+      .slice(0, 80),
     // QUEM registrou, quando foi gente. A catraca não tem nome, e o `origem` já
     // conta essa parte.
     por: opcoes.por?._id ? new ObjectId(String(opcoes.por._id)) : null,
@@ -155,6 +158,131 @@ Checkin_model.prototype.doDia = async function (de, ate) {
     .sort({ em: -1 })
     .limit(500)
     .toArray();
+};
+
+// QUANTAS ENTRADAS num intervalo, e quantas PESSOAS diferentes.
+//
+// Os dois números, porque são perguntas diferentes e o painel mostra a
+// segunda: quem veio hoje. Três entradas da mesma pessoa (saiu para o carro,
+// voltou de noite) são três passagens e uma pessoa — dizer "3 alunos hoje"
+// quando veio um seria pior que não dizer nada.
+//
+// A UNIDADE é a do check-in, gravada por quem registrou: aqui ela não precisa
+// ser deduzida da pessoa, porque a passagem acontece numa porta, e a porta
+// tem endereço. Ver `registrar`.
+// ── AS ENTRADAS DIA A DIA, PARA O GRÁFICO DO PAINEL (22/10/2026) ─────────
+//
+// O cartão diz quantas passaram hoje; o gráfico diz se hoje foi um dia bom.
+// Sem a linha embaixo, "12 entradas" não responde nada — doze é muito ou é
+// pouco? A resposta está nos catorze dias anteriores, e ela já está no banco.
+//
+// ── DIA, E NÃO MÊS ───────────────────────────────────────────────────────
+//
+// Porque o cartão é de HOJE. Um gráfico mensal embaixo de um número diário
+// seria um gráfico cujo último ponto não é o número desenhado em cima dele — e
+// essa é a única regra que todo gráfico deste painel obedece.
+//
+// `em` é o instante da passagem, então o dia é o dia NO FUSO DA CASA: o
+// servidor roda em UTC, e às 21h de Brasília ele já virou amanhã. Sem o
+// `timezone`, toda entrada da noite apareceria na barra do dia seguinte.
+Checkin_model.prototype.seriePorDia = async function (de, ate, { unit, units } = {}, fuso) {
+  const col = await this.collection();
+
+  const filtro = { em: { $gte: new Date(de), $lte: new Date(ate) } };
+  if (ObjectId.isValid(unit)) filtro.unit = new ObjectId(String(unit));
+  else {
+    const cerca = lenteDeUnidade.filtroDeUnidades(units);
+    if (cerca) Object.assign(filtro, cerca);
+  }
+
+  const linhas = await col
+    .aggregate([
+      { $match: filtro },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$em", timezone: fuso } },
+          entradas: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ])
+    .toArray();
+
+  return linhas.map((l) => ({ r: l._id, entradas: l.entradas || 0 }));
+};
+
+// ── AS PASSAGENS DE UM DIA, COM NOME (22/10/2026) ───────────────────────
+//
+// Para a janela que lista o que está por trás da barra do gráfico:
+// *"se clicar no gráfico tinha que abrir outro dialog"*.
+//
+// `doDia` logo acima não serve: ele não tem a cerca de unidade e devolve o
+// documento cru, sem o nome de quem passou. Uma lista de ObjectId não é uma
+// lista.
+//
+// Três entradas da mesma pessoa são TRÊS linhas aqui, e é o certo: o número do
+// cartão conta passagens (ver `resumoDoDia`), e a lista por trás de um número
+// tem de ter o mesmo tamanho que ele.
+Checkin_model.prototype.linhasDoDia = async function (de, ate, { unit, units } = {}, limite = 50) {
+  const col = await this.collection();
+
+  const filtro = { em: { $gte: new Date(de), $lte: new Date(ate) } };
+  if (ObjectId.isValid(unit)) filtro.unit = new ObjectId(String(unit));
+  else {
+    const cerca = lenteDeUnidade.filtroDeUnidades(units);
+    if (cerca) Object.assign(filtro, cerca);
+  }
+
+  const [linhas, total] = await Promise.all([
+    col
+      .aggregate([
+        { $match: filtro },
+        { $sort: { em: -1 } },
+        { $limit: limite },
+        {
+          $lookup: {
+            from: "users",
+            localField: "person",
+            foreignField: "_id",
+            // Quatro campos. O documento da pessoa tem senha, sal e ficha
+            // inteira, e nada disso precisa sair daqui para desenhar uma linha.
+            pipeline: [{ $project: { name: 1 } }],
+            as: "quem",
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            id: { $toString: "$_id" },
+            pessoa: { $toString: "$person" },
+            nome: { $ifNull: [{ $arrayElemAt: ["$quem.name", 0] }, ""] },
+            em: 1,
+          },
+        },
+      ])
+      .toArray(),
+    col.countDocuments(filtro),
+  ]);
+
+  return { linhas, total };
+};
+
+Checkin_model.prototype.resumoDoDia = async function (de, ate, { unit, units } = {}) {
+  const col = await this.collection();
+
+  const filtro = { em: { $gte: new Date(de), $lte: new Date(ate) } };
+  if (ObjectId.isValid(unit)) filtro.unit = new ObjectId(String(unit));
+  else {
+    const cerca = lenteDeUnidade.filtroDeUnidades(units);
+    if (cerca) Object.assign(filtro, cerca);
+  }
+
+  const [entradas, pessoas] = await Promise.all([
+    col.countDocuments(filtro),
+    col.distinct("person", filtro),
+  ]);
+
+  return { entradas, pessoas: pessoas.length };
 };
 
 Checkin_model.prototype.removeAllOf = async function (pessoa) {

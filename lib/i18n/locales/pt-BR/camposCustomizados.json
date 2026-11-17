@@ -1,6 +1,7 @@
 {
   "customFields": {
     "group": {
+      "endereco": "Endereço",
       "principal": "Principal"
     },
     "native": {
@@ -8,8 +9,19 @@
       "height": "Altura (cm)",
       "weight": "Peso (kg)"
     },
+    "seed": {
+      "bairro": "Bairro",
+      "cep": "CEP",
+      "cidade": "Cidade",
+      "complemento": "Complemento",
+      "cpf": "CPF",
+      "estado": "Estado",
+      "logradouro": "Logradouro",
+      "numero": "Número"
+    },
     "type": {
       "areaDeTexto": "Área de texto",
+      "cep": "CEP",
       "cnpj": "CNPJ",
       "cpf": "CPF",
       "data": "Data",

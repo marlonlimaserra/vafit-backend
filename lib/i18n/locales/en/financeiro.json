@@ -10,8 +10,21 @@
     "paymentMethodNotFound": "Payment method not found.",
     "paymentMethodSystem": "Built-in methods cannot be deleted — disable it to take it out of the picker.",
     "paymentNotFound": "Payment not found.",
-    "recurrenceNotFound": "Recurrence not found.",
-    "requireAmount": "Enter the amount."
+    "recurrenceAmountLocked": "The amount comes from the plan. Pick a plan — or ask for permission to set the amount.",
+    "recurrenceNotFound": "Subscription not found.",
+    "requireAmount": "Enter the amount.",
+    "installmentInvalid": "Invalid installment plan: enter the total amount and 2 to 48 installments.",
+    "chargeAlreadyAtGateway": "This charge was already created at the gateway. Cancel the invoice there before creating another.",
+    "chargeNotOpen": "This charge is not open — there is nothing to collect.",
+    "chargeGateway": "The gateway did not accept the charge.",
+    "chargeNotAtGateway": "This charge was not created at the gateway — there is no invoice to refund.",
+    "chargeRefund": "The gateway did not accept the refund.",
+    "chargeNoLink": "This charge has no payment link to send.",
+    "personNoEmail": "This person has no e-mail on file.",
+    "chargeEmail": "The e-mail could not be sent right now.",
+    "chargeHasPayments": "This charge has money received. Delete the payment (or refund it) before removing it.",
+    "chargeGatewayCancel": "The gateway refused to cancel the invoice, so the charge stays open here. If it has already been paid, the way out is a refund.",
+    "chargeGatewayDelete": "The gateway refused to delete the invoice, so the charge stays here."
   },
   "finance": {
     "every": {
@@ -23,12 +36,29 @@
       "semiannual": "Every six months",
       "weekly": "Weekly"
     },
+    "gatewayState": {
+      "approved": "Approved in review",
+      "authorized": "Card authorized",
+      "refunding": "Refund in progress",
+      "refused": "Refused in review",
+      "underReview": "Under risk review"
+    },
+    "method": {
+      "billet": "Bank slip",
+      "cash": "Cash",
+      "credit": "Credit card",
+      "debit": "Debit card",
+      "other": "Other",
+      "pix": "Pix",
+      "transfer": "Bank transfer"
+    },
     "paymentStatus": {
       "canceled": "Cancelled",
       "paid": "Paid",
       "pending": "Pending",
       "refunded": "Refunded"
     },
+    "recurrenceCanceledAtGateway": "Subscription cancelled at the payment gateway.",
     "recurrenceStatus": {
       "active": "Active",
       "canceled": "Cancelled"
@@ -38,6 +68,14 @@
       "late": "Late",
       "open": "Open",
       "paid": "Paid"
+    }
+  },
+  "gatewayLog": {
+    "estado": {
+      "aplicado": "Applied",
+      "ignorado": "No owner here",
+      "recusado": "Refused",
+      "erro": "Our error"
     }
   }
 }

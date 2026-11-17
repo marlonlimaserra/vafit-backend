@@ -56,7 +56,7 @@ describe("a marca da casa", () => {
     }).html;
 
     assert.match(daCasa, /exemplo\.com\/minha-logo\.png/);
-    assert.doesNotMatch(daCasa, /gofitnow\.fit\/logo\.png/);
+    assert.doesNotMatch(daCasa, /vafit\.app\/logo\.png/);
   });
 
   test("sem logo da casa, entra a nossa — e por URL, não embutida", () => {
@@ -64,7 +64,7 @@ describe("a marca da casa", () => {
     // hospedada, e um `data:` de 260 kB engorda toda mensagem.
     const html = passwordReset({ ...BASE, tema: { brand: "#0ea5e9" } }).html;
 
-    assert.match(html, /<img src="https:\/\/gofitnow\.fit\/logo\.png"/);
+    assert.match(html, /<img src="https:\/\/vafit\.app\/logo\.png"/);
     assert.doesNotMatch(html, /src="data:/);
   });
 });
@@ -127,6 +127,75 @@ describe("o convite de anamnese usa o mesmo desenho", () => {
     }).html;
 
     assert.match(html, /Ana Souza/);
-    assert.match(html, /<img src="https:\/\/gofitnow\.fit\/logo\.png"/);
+    assert.match(html, /<img src="https:\/\/vafit\.app\/logo\.png"/);
+  });
+});
+
+// ── O QUE VEM DE FORA ENTRA COMO TEXTO (16/11/2026) ───────────────────────
+//
+// A tradução não escapa a interpolação. O nome de quem marca pela página
+// pública vai direto para o e-mail do profissional — e sem escape, um anônimo
+// punha um link "Pague aqui" dentro de um e-mail com a logo da academia.
+describe("dado de fora não vira HTML no e-mail", () => {
+  const { bookingReceived, planSignupToUnit } = require("../../lib/emailTemplates.js");
+  const MALICIOSO = '<a href="https://golpe.test">Pague aqui</a>';
+
+  test("o nome de quem marcou pela página pública sai escapado", () => {
+    const mail = bookingReceived({
+      lang: "pt-BR",
+      name: "Marlon",
+      person: MALICIOSO,
+      service: "Treino",
+      when: "amanhã às 8h",
+      contact: "x@y.test",
+      url: "https://marlon.vafit.app/agenda",
+    });
+    assert.ok(!mail.html.includes('<a href="https://golpe.test">'), "o link injetado não pode existir");
+    assert.ok(mail.html.includes("&lt;a href=&quot;https://golpe.test&quot;&gt;Pague aqui&lt;/a&gt;"));
+  });
+
+  test("assunto e texto puro continuam crus — lá não é HTML, e `&amp;` apareceria escrito", () => {
+    const mail = bookingReceived({
+      lang: "pt-BR",
+      name: "Marlon",
+      person: "Ana & João",
+      service: "Treino",
+      when: "amanhã",
+      contact: "—",
+      url: "https://marlon.vafit.app/agenda",
+    });
+    assert.ok(mail.subject.includes("Ana & João"));
+    assert.ok(mail.text.includes("Ana & João"));
+    assert.ok(mail.html.includes("Ana &amp; João"));
+  });
+
+  test("a matrícula pela vitrine também (WhatsApp e nome vêm do público)", () => {
+    const mail = planSignupToUnit({
+      lang: "pt-BR",
+      name: "Recepção",
+      person: MALICIOSO,
+      plano: "Mensal",
+      unidade: "Centro",
+      valor: "R$ 100",
+      cpf: "",
+      whatsapp: "<img src=x onerror=alert(1)>",
+      contact: "",
+      url: "https://marlon.vafit.app",
+    });
+    assert.ok(!mail.html.includes("<img src=x"));
+    assert.ok(!mail.html.includes('<a href="https://golpe.test">'));
+  });
+
+  test("o HTML do PRÓPRIO texto traduzido continua HTML (o <strong>, o <br>)", () => {
+    const mail = bookingReceived({
+      lang: "pt-BR",
+      name: "Marlon",
+      person: "Ana",
+      service: "Treino",
+      when: "amanhã",
+      contact: "—",
+      url: "https://marlon.vafit.app/agenda",
+    });
+    assert.ok(mail.html.includes("<strong>Ana</strong>"));
   });
 });

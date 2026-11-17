@@ -9,6 +9,10 @@
         "title": {
           "hint": "Ex.: Treino, Consulta",
           "label": "Tipo do compromisso"
+        },
+        "minutes": {
+          "label": "Duração do compromisso (min)",
+          "hint": "Ex.: 50"
         }
       },
       "assessment": {

@@ -7,6 +7,7 @@
     "lastAccountManagingRolesEdit": "Esta es la última cuenta activa que gestiona permisos — promueve otra antes de alterar esta.",
     "lastManagerGroup": "Este grupo es el que te da permiso para gestionar permisos. Borrarlo bloquearía esta pantalla.",
     "lastRoleManagingRoles": "Este es el único tipo que todavía gestiona permisos, y es el tuyo. Dale ese permiso a otro tipo antes.",
+    "needRolesManageToGrant": "Solo quien gestiona permisos puede conceder o editar el poder de administrador.",
     "noPermission": "Tu tipo de usuario no tiene permiso para esto.",
     "roleNameTaken": "Ya existe un tipo con ese nombre.",
     "roleNotFound": "Tipo de usuario no encontrado."
@@ -46,7 +47,7 @@
         "title": "Ejercicios"
       },
       "finance": {
-        "description": "Cobros, pagos y recibos",
+        "description": "Cobros, suscripciones y recibos",
         "title": "Financiero"
       },
       "foods": {
@@ -187,6 +188,18 @@
         "manage": {
           "hint": "Registrar cobros y pagos. La pantalla está en construcción.",
           "label": "Gestionar el financiero"
+        },
+        "recurrence": {
+          "hint": "Registrar el plan suscrito, que genera el cobro solo.",
+          "label": "Crear y editar suscripciones"
+        },
+        "recurrenceAmount": {
+          "hint": "Sin esta, el valor es siempre el del plan elegido — nada de descuento.",
+          "label": "Definir el valor de la suscripción"
+        },
+        "recurrenceDelete": {
+          "hint": "Dar de baja la suscripción. Los cobros ya generados continúan.",
+          "label": "Eliminar suscripciones"
         },
         "view": {
           "hint": "Abrir la pestaña financiera y ver cobros. La pantalla está en construcción.",

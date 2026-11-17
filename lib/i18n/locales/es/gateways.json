@@ -1,0 +1,21 @@
+{
+  "errors": {
+    "gatewayUnknown": "Esa pasarela de pago no existe",
+    "gatewayNoKey": "Pega la clave de API de la pasarela",
+    "gatewayBadKey": "La pasarela rechazó esa clave. Comprueba que la copiaste entera.",
+    "gatewayWrongKeyType": "Esa es la clave pública (pk_), que solo sirve para tokenizar tarjetas. La integración necesita la clave secreta (sk_) — crea una en la misma pantalla.",
+    "gatewayUnreachable": "No pudimos hablar con la pasarela ahora. La clave puede estar bien: inténtalo de nuevo en unos instantes.",
+    "gatewayNotSet": "Configura esa pasarela antes de elegirla",
+    "gatewayNoTokenize": "Esa pasarela no guarda tarjetas",
+    "cardNoPerson": "Esa persona no existe",
+    "cardNotFound": "Esa tarjeta ya no está guardada",
+    "cardNoGateway": "La unidad de esta persona no tiene una pasarela que guarde tarjetas",
+    "cardNoTokenization": "La cuenta de la pasarela todavía no tiene habilitada la tokenización de tarjeta. Pídela a su soporte y marca la casilla en Configuración › Pasarelas de pago.",
+    "cardNoDocument": "Informa el documento del titular — la pasarela lo exige para guardar la tarjeta",
+    "cardHolderIncomplete": "Faltan datos del titular que la pasarela exige: nombre, correo, documento, teléfono, código postal y número",
+    "cardBadDocument": "El documento del titular debe tener 11 dígitos (o 14, si es empresa)",
+    "cardBadZip": "El código postal del titular debe tener 8 dígitos",
+    "cardIncomplete": "Faltó algún dato de la tarjeta",
+    "cardRefused": "La pasarela no guardó esa tarjeta."
+  }
+}

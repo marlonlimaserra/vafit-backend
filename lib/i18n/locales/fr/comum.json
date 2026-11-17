@@ -119,6 +119,9 @@
     },
     "usernameInUse": "Ce nom d’utilisateur est déjà pris.",
     "vocabularyLength": "Utilisez entre 3 et 20 lettres pour le {{field}} (ex. : élève / élèves).",
-    "wrongCurrentPassword": "Mot de passe actuel incorrect."
+    "wrongCurrentPassword": "Mot de passe actuel incorrect.",
+    "invalidMinutes": "Indiquez les minutes en chiffres, de {{min}} à {{max}}.",
+    "accessBlocked": "Votre accès a été bloqué. Pour le débloquer, contactez votre professionnel.",
+    "accountInactive": "Votre compte est désactivé. Pour le réactiver, contactez votre professionnel."
   }
 }

@@ -1,4 +1,7 @@
 const instanceContext = require("../lib/instance.js");
+const dominio = require("../lib/domain.js");
+const arquivos = require("../lib/arquivos.js");
+const estadoDaConta = require("../lib/estadoDaConta.js");
 
 // CONECTAR O INSTAGRAM DO PROFISSIONAL AO VAFIT.
 //
@@ -31,7 +34,28 @@ const TELA = {
   facebook: "/configuration/facebook",
 };
 
+// De quantos em quantos dias a cópia da foto é refeita.
+//
+// A URL que o Graph devolve é assinada e MUDA a cada chamada, então comparar
+// endereços não diz nada sobre a imagem ter mudado. Sem um prazo, a foto que
+// copiamos no dia da conexão ficaria para sempre — a Página troca de logo e
+// aqui continua a antiga. Um mês é barato (um download por conta por mês) e
+// resolve o caso real, que é raro.
+const REFRESCA_APOS_DIAS = 30;
+
 module.exports = function (app) {
+  // O ENDEREÇO FIXO da foto — *"deixe o link fixo"* (15/10/2026).
+  //
+  // Ele nunca muda para uma conta: é o id dela. O que muda é o `?v=`, que sai
+  // da data da cópia — é o que faz uma foto trocada aparecer sem esperar o
+  // cache de um ano que a rota manda guardar.
+  const urlDaFoto = (instancia, conta) =>
+    conta.fotoEm
+      ? `${dominio.apiBaseUrl()}/public/conta-foto/${instancia}/${conta._id}?v=${new Date(conta.fotoEm).getTime()}`
+      : "";
+
+  const paraTela = (instancia) => (c) => ({ ...c, foto: urlDaFoto(instancia, c) });
+
   // ── A LISTA ────────────────────────────────────────────────────────────
   app.get("/contas-conectadas", async function (req, res) {
     const user = await app.helpers.ReqProtected.can(req, res, "integrations.view");
@@ -51,10 +75,94 @@ module.exports = function (app) {
     // Instagram usa o app de Instagram Business Login, a Página usa o app de
     // integração com uma configuração. Um pode estar pronto sem o outro.
     res.send({
-      contas,
+      contas: contas.map(paraTela(req.instance)),
       instagram: { ligado: doInstagram.ligado },
       facebook: { ligado: daPagina.ligado },
+      // O catálogo do selo, já traduzido. A tela não conhece estado nenhum:
+      // acrescentar um aqui o faz aparecer lá sem mexer numa linha de lá.
+      estados: estadoDaConta.paraTela(req.t),
     });
+  });
+
+  // ── O SELO: PERGUNTAR À META SE O TOKEN AINDA VALE ─────────────────────
+  //
+  // *"coloque um 'badge' de status, que vai no backend e consulta se o token
+  // ainda está funcionando"* (15/10/2026).
+  //
+  // Rota SEPARADA da lista, de propósito. A lista abre com o último resultado
+  // conhecido e isto chega depois: perguntar antes de desenhar faria a tela
+  // esperar a rede da Meta — e quando ela está lenta é justamente quando
+  // alguém veio olhar por quê.
+  //
+  // `integrations.view` e não `manage`: isto não muda a integração, só olha.
+  app.post("/contas-conectadas/verificar", async function (req, res) {
+    const user = await app.helpers.ReqProtected.can(req, res, "integrations.view");
+    if (user === false) return;
+
+    const tipo = req.query.tipo === "facebook" ? "facebook" : "instagram";
+    const modelo = tipo === "facebook" ? app.api.oauthPagina : app.api.oauthInstagram;
+
+    const contas = await app.api.contaConectada.paraConferir(tipo);
+    const chaves = await modelo.chaves();
+
+    // Sem as chaves do app não dá para perguntar nada — e isso não é defeito
+    // da conta de ninguém. A lista volta como está, e o selo segue cinza.
+    if (chaves.ligado) {
+      await Promise.all(
+        contas.map(async (conta) => {
+          const r =
+            tipo === "facebook" ? await modelo.conferir(conta, chaves) : await modelo.conferir(conta);
+
+          await app.api.contaConectada.marcarEstado(conta._id, r);
+
+          // A MESMA IDA TRAZ A FOTO, e é ela que conserta as contas ligadas
+          // antes de 15/10 — quando o que se guardava era a URL do CDN, que
+          // expira. Sem isto, só reconectar traria a imagem de volta.
+          if (r.foto && precisaDeFoto(conta)) {
+            await app.api.contaConectada.copiarFoto(conta, r.foto);
+          }
+        })
+      );
+    }
+
+    res.send({ contas: (await app.api.contaConectada.lista(tipo)).map(paraTela(req.instance)) });
+  });
+
+  function precisaDeFoto(conta) {
+    const em = conta.fotoArquivo?.em;
+    if (!em) return true;
+    return Date.now() - new Date(em).getTime() > REFRESCA_APOS_DIAS * 86400000;
+  }
+
+  // ── OS BYTES DA FOTO ───────────────────────────────────────────────────
+  //
+  // Pública e com endereço opaco, como a capa de um plano: é um `<img>` numa
+  // tela, e `<img>` não manda cabeçalho de sessão. O que ela serve é a foto
+  // de perfil de uma Página pública, e o id não deixa varrer nada — mas o
+  // token, esse, nunca passa por aqui.
+  app.get("/public/conta-foto/:instance/:id", async function (req, res) {
+    const instancia = instanceContext.normalize(req.params.instance);
+    if (!instancia) return res.status(404).end();
+
+    const foto = await instanceContext.run(instancia, () =>
+      app.api.contaConectada.foto(req.params.id)
+    );
+    // 404 seco: aqui não há quem leia mensagem traduzida.
+    if (!foto) return res.status(404).end();
+
+    const etag = '"' + new Date(foto.em || 0).getTime() + '"';
+    if (req.headers["if-none-match"] === etag) return res.status(304).end();
+
+    const bytes = await arquivos.bytesDoDocumento(foto);
+    if (!bytes) return res.status(404).end();
+
+    res.setHeader("Content-Type", foto.mime || "image/jpeg");
+    res.setHeader("ETag", etag);
+    // Um ano, mas NÃO `immutable`: o endereço é fixo e a imagem pode ser
+    // trocada (a Página muda de logo). Quem troca o `?v=` é a lista, e o ETag
+    // segura o resto.
+    res.setHeader("Cache-Control", "public, max-age=31536000");
+    res.send(bytes);
   });
 
   // ── PARA ONDE MANDAR O NAVEGADOR ───────────────────────────────────────

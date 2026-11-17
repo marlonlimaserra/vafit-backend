@@ -1,0 +1,88 @@
+{
+  "condicoes": {
+    "cat": {
+      "acesso": "Acesso",
+      "aula": "Aulas coletivas",
+      "avaliacao": "Avaliação",
+      "contato": "Contato",
+      "dieta": "Dieta",
+      "financeiro": "Financeiro",
+      "frequencia": "Frequência",
+      "pendencias": "Pendências"
+    },
+    "cond": {
+      "acesso_app": "Acesso ao aplicativo",
+      "aula_qual": "Frequentou a aula",
+      "aula_total": "Aulas que frequentou",
+      "aula_ultima": "Última aula que fez",
+      "avaliacao_tem": "Avaliação física",
+      "avaliacao_ultima": "Última avaliação",
+      "cadastrado_em": "Data de cadastro",
+      "cobranca_aberta": "Cobrança em aberto",
+      "cobranca_valor": "Valor em aberto (R$)",
+      "cobranca_vencida": "Cobrança vencida",
+      "dieta_alimento": "Alimento no plano",
+      "dieta_carboidrato": "Carboidrato (g)",
+      "dieta_gordura": "Gordura (g)",
+      "dieta_kcal": "Calorias (kcal)",
+      "dieta_proteina": "Proteína (g)",
+      "dieta_vigente": "Dieta vigente",
+      "email": "E-mail",
+      "foto": "Foto",
+      "frequencia_total": "Visitas",
+      "frequencia_ultima": "Última visita",
+      "nascimento": "Data de nascimento",
+      "nome": "Nome",
+      "passagem": "Passagem na catraca",
+      "pendencia_aberta": "Pendência em aberto",
+      "pendencia_total": "Quantas pendências",
+      "sexo": "Sexo",
+      "status": "Status na sua lista",
+      "unidade": "Unidade",
+      "whatsapp": "WhatsApp"
+    },
+    "op": {
+      "antes": "Antes de",
+      "contem": "Contém",
+      "depois": "A partir de",
+      "dia": "Nesse dia",
+      "e": "É",
+      "entre": "Entre",
+      "maior": "Maior que",
+      "menor": "Menor que",
+      "nao_contem": "Não contém",
+      "nao_e": "Não é",
+      "preenchido": "Está preenchido",
+      "vazio": "Está vazio"
+    },
+    "val": {
+      "ativo": "Ativo",
+      "female": "Feminino",
+      "inativo": "Inativo",
+      "male": "Masculino",
+      "sem": "Sem sexo"
+    },
+    "sim": {
+      "_": "Sim",
+      "acesso_app": "Liberado",
+      "avaliacao_tem": "Tem",
+      "cobranca_aberta": "Tem",
+      "cobranca_vencida": "Tem",
+      "dieta_vigente": "Tem",
+      "foto": "Tem",
+      "passagem": "Liberada",
+      "pendencia_aberta": "Tem"
+    },
+    "nao": {
+      "_": "Não",
+      "acesso_app": "Bloqueado",
+      "avaliacao_tem": "Não tem",
+      "cobranca_aberta": "Não tem",
+      "cobranca_vencida": "Não tem",
+      "dieta_vigente": "Não tem",
+      "foto": "Não tem",
+      "passagem": "Bloqueada",
+      "pendencia_aberta": "Não tem"
+    }
+  }
+}

@@ -4,7 +4,7 @@ const instanceContext = require("../lib/instance.js");
 
 // O catálogo de exercícios, no banco central.
 //
-//   { name, nameSort, muscleGroup, videoUrl, thumbUrl, defaultTip, instance }
+//   { name, nameSort, muscleGroup, clipSlug, defaultTip, instance }
 //
 // `instance` é o dono, e ele tem dois valores possíveis:
 //
@@ -137,7 +137,24 @@ function seriesPadrao(lista) {
 function publico(doc) {
   if (!doc) return doc;
 
-  const { instance, ...resto } = doc;
+  // O VÍDEO DE TERCEIROS E A FOTO QUE SAÍA DELE NÃO VIAJAM MAIS (21/10/2026).
+  //
+  // *"vi que tem exercício com vídeo ou foto antiga de pessoas, pode remover"*.
+  //
+  // Os dois campos são da época em que a demonstração era um link do YouTube:
+  // `videoUrl` era o link e `thumbUrl` a capa que o YouTube gera dele — a foto
+  // de uma pessoa desconhecida, de um canal qualquer, dentro do nosso catálogo.
+  // Umas trezentas linhas ainda as têm.
+  //
+  // Hoje a demonstração é o clipe em 3D (`clipSlug`), que é nosso. Manter as
+  // duas é o catálogo falando por duas bocas, e a antiga é a que apodrece
+  // sozinha: o vídeo sai do ar, o canal muda de nome, a capa vira um quadro
+  // aleatório — tudo isso sem ninguém aqui ficar sabendo.
+  //
+  // Elas continuam GRAVADAS e param de SAIR. Deixar de mandar é uma linha para
+  // desfazer; um `$unset` em mil e quatrocentos documentos compartilhados, que
+  // valem para todos os clientes ao mesmo tempo, não é.
+  const { instance, videoUrl, thumbUrl, ...resto } = doc;
   return { ...resto, own: Boolean(instance) };
 }
 
@@ -249,7 +266,11 @@ Exercise_model.prototype.clipesPorExercicio = async function (ids) {
     const linhas = await col
       .find(
         { _id: { $in: validos.map((x) => new ObjectId(x)) }, clipSlug: { $exists: true, $ne: "" } },
-        { projection: { clipSlug: 1 } }
+        // `clipBase` junto: é ele que faz a ficha escrever "movimento base" em
+        // cima da demonstração. Sem ele aqui, o card do treino mostraria o clipe
+        // aproximado SEM a marca — exatamente o que a marca existe para evitar —
+        // enquanto o mesmo exercício, no catálogo, apareceria marcado.
+        { projection: { clipSlug: 1, clipBase: 1 } }
       )
       .toArray();
 
@@ -258,7 +279,10 @@ Exercise_model.prototype.clipesPorExercicio = async function (ids) {
     const comVersao = await comVersaoDoClipe(this.app, linhas);
 
     return Object.fromEntries(
-      comVersao.map((l) => [String(l._id), { clipSlug: l.clipSlug, clipV: l.clipV }])
+      comVersao.map((l) => [
+        String(l._id),
+        { clipSlug: l.clipSlug, clipV: l.clipV, clipBase: l.clipBase || undefined },
+      ])
     );
   } catch (erro) {
     // Demonstração é acessório: uma falha aqui não pode tirar o treino da tela
@@ -313,16 +337,6 @@ Exercise_model.prototype.clip = async function (slug) {
   return { dados, quando: doc.updatedAt || null };
 };
 
-// Thumbnail derived from the video URL when possible. YouTube covers most
-// cases; anything else stays without an image.
-function thumbnailFromVideo(videoUrl) {
-  if (!videoUrl) return null;
-  const yt = String(videoUrl).match(
-    /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})/
-  );
-  return yt ? `https://img.youtube.com/vi/${yt[1]}/mqdefault.jpg` : null;
-}
-
 Exercise_model.prototype.insert = async function (obj) {
   const col = await this.collection();
 
@@ -330,8 +344,6 @@ Exercise_model.prototype.insert = async function (obj) {
     name: String(obj.name).trim(),
     nameSort: normalize(obj.name),
     muscleGroup: obj.muscleGroup ? String(obj.muscleGroup).trim() : "",
-    videoUrl: obj.videoUrl ? String(obj.videoUrl).trim() : "",
-    thumbUrl: thumbnailFromVideo(obj.videoUrl),
     defaultTip: obj.defaultTip ? String(obj.defaultTip).trim() : "",
 
     // Como este exercício costuma ser prescrito. Vazio é o normal — quem não
@@ -368,10 +380,9 @@ Exercise_model.prototype.update = async function (id, obj) {
   }
   if (obj.muscleGroup !== undefined) set.muscleGroup = String(obj.muscleGroup).trim();
   if (obj.defaultTip !== undefined) set.defaultTip = String(obj.defaultTip).trim();
-  if (obj.videoUrl !== undefined) {
-    set.videoUrl = String(obj.videoUrl).trim();
-    set.thumbUrl = thumbnailFromVideo(obj.videoUrl);
-  }
+  // `videoUrl` SAIU, e um campo que some tem de sumir dos dois lados: a rota
+  // antiga continuaria aceitando o link de quem tivesse o endereço decorado, e
+  // o catálogo voltaria a ganhar foto de gente que não é nossa.
 
   if (obj.defaultMethod !== undefined) {
     set.defaultMethod = String(obj.defaultMethod).trim().slice(0, 40);

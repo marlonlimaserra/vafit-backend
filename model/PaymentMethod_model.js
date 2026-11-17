@@ -82,6 +82,41 @@ PaymentMethod_model.prototype.listActive = async function () {
   return (await this.list()).filter((f) => Number(f.active) !== 0);
 };
 
+// O `t` do servidor devolve a PRÓPRIA CHAVE quando não acha (ver
+// `lib/i18n/index.js`), o que é ótimo para caçar texto faltando e péssimo aqui:
+// uma forma criada pela casa sem nome gravado sairia como
+// "finance.method.cheque" num cartão de venda. Só as sete originais têm
+// tradução; qualquer outra chave volta a ser ela mesma.
+function traduzida(t, key) {
+  const chave = `finance.method.${key}`;
+  const texto = t(chave);
+  return texto === chave ? key : texto;
+}
+
+// A lista PRONTA PARA A TELA: só as ativas, e com o nome já resolvido.
+//
+// As sete originais nascem com `name` vazio de propósito (ver a nota em
+// `list`): o nome delas é a tradução. Quem lê a lista crua precisa, então,
+// saber dessa regra — e já eram três telas sabendo, cada uma com a sua cópia
+// de `nomeDaForma`.
+//
+// Isso funcionava enquanto só o PAINEL lia a lista. A vitrine pública quebrou
+// a conta: ela carrega só a parte `vitrine` da tradução, e puxar o dicionário
+// inteiro do financeiro para escrever "Pix" numa página de venda é pagar caro
+// por sete palavras.
+//
+// Então o nome sai resolvido daqui, no idioma do pedido. É o mesmo arranjo de
+// `recorrencia.paraTela(req.t)`, e pelo mesmo motivo: catálogo viaja
+// traduzido.
+PaymentMethod_model.prototype.paraTela = async function (t) {
+  return (await this.listActive()).map((f) => ({
+    key: f.key,
+    // O nome PRÓPRIO vence a tradução: quem renomeou "Pix" para "Pix (CNPJ)"
+    // escolheu aquele nome, e traduzi-lo de volta seria desfazer a escolha.
+    name: f.name || traduzida(t, f.key),
+  }));
+};
+
 // As chaves que um pagamento pode ter: TODAS, inclusive as desativadas.
 //
 // Desativar tira do seletor, não invalida o passado. Recusar aqui impediria de

@@ -88,7 +88,11 @@ module.exports = function (app) {
   });
 
   app.post("/me/brand/image", async function (req, res) {
-    const user = await app.helpers.ReqProtected.verify(req, res);
+    // `users.manage`, a MESMA de gravar o tema (`PUT /me/tenant/theme`): só a
+    // Aparência sobe imagem de marca. Bastava estar logado — um CLIENTE podia
+    // subir até 24 imagens, e elas ficam PÚBLICAS no endereço da casa
+    // (16/11/2026, na conferência de "o aluno consegue mexer no sistema?").
+    const user = await app.helpers.ReqProtected.can(req, res, "users.manage");
     if (user === false) return;
 
     // Uma chave de API não sobe imagem de marca, pelo mesmo motivo de não

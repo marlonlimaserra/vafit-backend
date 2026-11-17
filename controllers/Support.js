@@ -58,6 +58,20 @@ function limparAnexos(lista) {
 }
 
 module.exports = function (app) {
+  // ── SÓ STAFF: a ajuda é o canal da ACADEMIA com o suporte da VAFIT ───────
+  //
+  // Os chamados são por INSTÂNCIA (um balcão por academia), não por pessoa: quem
+  // abre vê TODOS os da casa. Isso é de quem toca a academia — nunca de um
+  // aluno, que vive no /my e jamais deveria ler a conversa da casa com o
+  // suporte. A tela mora no menu do profissional; faltava a trava no servidor.
+  function staffBarrado(user, req, res) {
+    if (user.type === "student") {
+      res.status(403).send({ msg: req.t("errors.noPermission"), permission: "staff" });
+      return true;
+    }
+    return false;
+  }
+
   // ── A TELA DE AJUDA, NUMA CHAMADA SÓ ────────────────────────────────────
   //
   // Perguntas, WhatsApp e a lista de chamados juntos. Quem abre a tela de ajuda
@@ -66,6 +80,7 @@ module.exports = function (app) {
   app.get("/me/support", async function (req, res) {
     const user = await app.helpers.ReqProtected.verify(req, res);
     if (user === false) return;
+    if (staffBarrado(user, req, res)) return;
 
     // AS IDEIAS ENTRAM NESTA MESMA CHAMADA, e pelo mesmo argumento que juntou as
     // outras três: quem abre a ajuda está com um problema, e somar latência é
@@ -89,6 +104,7 @@ module.exports = function (app) {
   app.get("/me/support/unread", async function (req, res) {
     const user = await app.helpers.ReqProtected.verify(req, res);
     if (user === false) return;
+    if (staffBarrado(user, req, res)) return;
 
     res.send({ unread: await app.api.support.naoLidos(req.instance) });
   });
@@ -96,6 +112,7 @@ module.exports = function (app) {
   app.get("/me/tickets/:id", async function (req, res) {
     const user = await app.helpers.ReqProtected.verify(req, res);
     if (user === false) return;
+    if (staffBarrado(user, req, res)) return;
 
     const doc = await app.api.support.data(req.instance, req.params.id);
     if (!doc) return res.status(404).send({ msg: req.t("errors.ticketNotFound") });
@@ -110,6 +127,7 @@ module.exports = function (app) {
   app.post("/me/tickets", async function (req, res) {
     const user = await app.helpers.ReqProtected.verify(req, res);
     if (user === false) return;
+    if (staffBarrado(user, req, res)) return;
 
     const assunto = texto(req.body?.assunto, MAX_ASSUNTO);
     const corpo = texto(req.body?.texto, MAX_TEXTO);
@@ -164,6 +182,7 @@ module.exports = function (app) {
   app.post("/me/tickets/:id/messages", async function (req, res) {
     const user = await app.helpers.ReqProtected.verify(req, res);
     if (user === false) return;
+    if (staffBarrado(user, req, res)) return;
 
     const corpo = texto(req.body?.texto, MAX_TEXTO);
     const anexos = limparAnexos(req.body?.anexos);
@@ -213,6 +232,7 @@ module.exports = function (app) {
   app.post("/me/tickets/anexo", async function (req, res) {
     const user = await app.helpers.ReqProtected.verify(req, res);
     if (user === false) return;
+    if (staffBarrado(user, req, res)) return;
 
     const casa = /^data:([^;,]+);base64,(.+)$/s.exec(String(req.body?.arquivo || ""));
     if (!casa) return res.status(400).send({ msg: req.t("errors.invalidFile") });
@@ -251,6 +271,7 @@ module.exports = function (app) {
   app.get("/me/tickets/anexo/:id", async function (req, res) {
     const user = await app.helpers.ReqProtected.verify(req, res);
     if (user === false) return;
+    if (staffBarrado(user, req, res)) return;
 
     const id = String(req.params.id || "");
     if (!/^[a-f0-9]{32}$/.test(id)) return res.status(404).end();

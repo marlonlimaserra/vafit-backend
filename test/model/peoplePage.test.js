@@ -335,3 +335,88 @@ test("o período entra antes do corte — ele decide quem entra na página", asy
   assert.ok(texto(antesDoCorte(pipelines[0].pipeline)).includes("createdAt"));
   assert.ok(!texto(antesDoCorte(pipelines[0].pipeline)).includes("$lookup"), "e sem junção");
 });
+
+// ── O BLOQUEIO PRECISA CHEGAR NA LISTA (12/11/2026) ──────────────────────
+//
+// *"tirei o acesso, ali aparece app revogado, e mesmo assim aparece app
+// liberado"*.
+//
+// Havia DUAS definições do mesmo campo. `filter()`, que serve a ficha, fazia
+// `!!password && !appBloqueado`. Esta agregação, que serve a LISTA, perguntava
+// só "tem senha?" — e revogar não apaga a senha (de propósito: quem volta não
+// deve precisar de senha nova). Resultado: para a lista, revogar não mudava
+// nada.
+//
+// O estrago passava do selo. O FILTRO "só quem entra no app" e o "iniciar uma
+// conversa" leem este mesmo campo, e ofereciam conversa com quem fora revogado.
+
+test("`hasAccess` da lista olha o BLOQUEIO, e não só a senha", async () => {
+  const { model, pipelines } = fakeModel();
+  await chamar(() => model.pageStudents(TRAINER, {}));
+
+  const campo = pipelines[0].pipeline.find(
+    (e) => e.$addFields && e.$addFields.hasAccess
+  );
+
+  assert.ok(campo, "a lista precisa calcular hasAccess");
+  assert.ok(
+    texto(campo).includes("appBloqueado"),
+    "sem isto, revogar o acesso não muda nada na lista"
+  );
+});
+
+test("ausência de `appBloqueado` é NÃO bloqueado", async () => {
+  // Ficha antiga não tem o campo. Ler a ausência como bloqueio esconderia a
+  // base inteira no dia do deploy — a mesma regra de `passagemLiberada`.
+  const { model, pipelines } = fakeModel();
+  await chamar(() => model.pageStudents(TRAINER, {}));
+
+  const campo = pipelines[0].pipeline.find((e) => e.$addFields && e.$addFields.hasAccess);
+
+  // `$ne: [..., true]` é verdadeiro para ausente, null e false. `$eq` com
+  // `false` seria falso para o ausente, que é a maioria da base.
+  assert.ok(texto(campo).includes('"$ne"'), "a comparação precisa ser por $ne");
+  assert.ok(!texto(campo).includes('"$eq":["$appBloqueado"'));
+});
+
+test("as DUAS definições de `hasAccess` concordam — a da ficha", async () => {
+  // A agregação é texto de pipeline e não roda aqui; esta é a metade que roda de verdade.
+  // Se um dia alguém mudar a regra, muda nos dois lugares ou um teste cai.
+  const model = new User_model({});
+
+  const casos = [
+    { password: "x", appBloqueado: undefined, esperado: true },
+    { password: "x", appBloqueado: false, esperado: true },
+    { password: "x", appBloqueado: true, esperado: false },
+    { password: undefined, appBloqueado: undefined, esperado: false },
+    { password: undefined, appBloqueado: true, esperado: false },
+  ];
+
+  for (const c of casos) {
+    const saida = model.filter({ _id: "p1", password: c.password, appBloqueado: c.appBloqueado });
+    assert.equal(
+      saida.hasAccess,
+      c.esperado,
+      `senha=${!!c.password} bloqueado=${c.appBloqueado}`
+    );
+    // E `temSenha` continua dizendo a outra coisa: tem COM O QUÊ entrar.
+    assert.equal(saida.temSenha, !!c.password);
+  }
+});
+
+test("a lista também devolve `temSenha`, senão desbloquear pede senha à toa", async () => {
+  // *"não quero ter que digitar senha toda vez que eu bloquear o acesso"*.
+  //
+  // Sem este campo, "bloqueado" e "nunca teve senha" chegam iguais na tela —
+  // os dois como `hasAccess: false` — e ela não tem como escolher entre
+  // desfazer a chave e pedir uma senha nova.
+  const { model, pipelines } = fakeModel();
+  await chamar(() => model.pageStudents(TRAINER, {}));
+
+  const campo = pipelines[0].pipeline.find((e) => e.$addFields && e.$addFields.temSenha);
+
+  assert.ok(campo, "a lista precisa mandar temSenha");
+  // E ele NÃO pode olhar o bloqueio: quem está bloqueado continua tendo senha,
+  // e é justamente isso que permite voltar com um toque.
+  assert.ok(!texto(campo.$addFields.temSenha).includes("appBloqueado"));
+});

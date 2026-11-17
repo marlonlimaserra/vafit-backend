@@ -10,8 +10,21 @@
     "paymentMethodNotFound": "Forma de pago no encontrada.",
     "paymentMethodSystem": "Las formas originales no se pueden borrar — desactívela para sacarla del selector.",
     "paymentNotFound": "Pago no encontrado.",
-    "recurrenceNotFound": "Recurrencia no encontrada.",
-    "requireAmount": "Informe el importe."
+    "recurrenceAmountLocked": "El importe viene del plan. Elige un plan — o pide permiso para definir el importe.",
+    "recurrenceNotFound": "Suscripción no encontrada.",
+    "requireAmount": "Informe el importe.",
+    "installmentInvalid": "Plan de cuotas inválido: indica el valor total y de 2 a 48 cuotas.",
+    "chargeAlreadyAtGateway": "Este cobro ya se generó en la pasarela. Cancela la factura allí antes de generar otra.",
+    "chargeNotOpen": "Este cobro no está pendiente: no hay nada que cobrar.",
+    "chargeGateway": "La pasarela no aceptó el cobro.",
+    "chargeNotAtGateway": "Este cobro no se generó en la pasarela: no hay factura que reembolsar.",
+    "chargeRefund": "La pasarela no aceptó el reembolso.",
+    "chargeNoLink": "Este cobro no tiene enlace de pago para enviar.",
+    "personNoEmail": "Esta persona no tiene correo registrado.",
+    "chargeEmail": "No se pudo enviar el correo ahora.",
+    "chargeHasPayments": "Este cobro ya recibió dinero. Elimina el pago (o reembólsalo) antes de quitarlo.",
+    "chargeGatewayCancel": "La pasarela no aceptó cancelar la factura, así que el cobro sigue abierto aquí. Si ya fue pagado, el camino es reembolsar.",
+    "chargeGatewayDelete": "La pasarela no aceptó eliminar la factura, así que el cobro sigue aquí."
   },
   "finance": {
     "every": {
@@ -23,12 +36,29 @@
       "semiannual": "Semestral",
       "weekly": "Semanal"
     },
+    "gatewayState": {
+      "approved": "Aprobado en el análisis",
+      "authorized": "Autorizado en la tarjeta",
+      "refunding": "Reembolso en curso",
+      "refused": "Rechazado en el análisis",
+      "underReview": "En análisis de riesgo"
+    },
+    "method": {
+      "billet": "Boleto",
+      "cash": "Efectivo",
+      "credit": "Tarjeta de crédito",
+      "debit": "Tarjeta de débito",
+      "other": "Otra",
+      "pix": "Pix",
+      "transfer": "Transferencia"
+    },
     "paymentStatus": {
       "canceled": "Cancelado",
       "paid": "Pagado",
       "pending": "Pendiente",
       "refunded": "Reembolsado"
     },
+    "recurrenceCanceledAtGateway": "Suscripción cancelada en la pasarela de pago.",
     "recurrenceStatus": {
       "active": "Activa",
       "canceled": "Cancelada"
@@ -38,6 +68,14 @@
       "late": "Atrasada",
       "open": "Pendiente",
       "paid": "Pagada"
+    }
+  },
+  "gatewayLog": {
+    "estado": {
+      "aplicado": "Aplicado",
+      "ignorado": "Sin dueño aquí",
+      "recusado": "Rechazado",
+      "erro": "Error nuestro"
     }
   }
 }

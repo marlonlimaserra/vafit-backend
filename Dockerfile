@@ -1,4 +1,4 @@
-# A API do GoFitNow, em container.
+# A API do VAFIT, em container.
 #
 # Existe desde 07/09/2026, para a saída do VPS da Hostinger. Nada aqui é
 # aplicado ainda: a imagem é o primeiro passo, e o resto do caminho está em

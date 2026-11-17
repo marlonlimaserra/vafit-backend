@@ -81,6 +81,10 @@ function monta({ estado, carga, usuario, chaves = CHAVES, trocaExplode = false }
           buscas.push({ email, instancia: instanceContext.current() });
           return usuario;
         },
+        // Sem conta: nada a explicar (nem bloqueada, nem desativada).
+        async motivoDoEmailVerificado() {
+          return null;
+        },
       },
       auth: {
         async registerToken(userId) {

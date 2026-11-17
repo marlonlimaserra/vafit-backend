@@ -12,6 +12,17 @@ const permissions = require("../../lib/permissions.js");
 // antigo para trás com gente dentro, e a plataforma ficaria com dois papéis quase
 // iguais sem ninguém saber qual vale.
 
+// Mongo casa um valor solto contra um ARRAY pelo "contém" — é o que faz
+// `{ permissions: "finance.manage" }` achar o papel que tem essa chave entre
+// outras. Sem isto aqui, a migração das chaves novas passaria no teste sem
+// encontrar papel nenhum.
+function casa(doc, query) {
+  return Object.entries(query).every(([k, v]) => {
+    if (typeof v === "object" && v !== null && "$ne" in v) return doc[k] !== v.$ne;
+    return Array.isArray(doc[k]) ? doc[k].includes(v) : doc[k] === v;
+  });
+}
+
 // Uma collection de mentira com a superfície que o `ensureSystemRoles` usa.
 function fakeCollection(docs = []) {
   const dados = docs.map((d, i) => ({ _id: d._id || `id${i}`, ...d }));
@@ -19,13 +30,20 @@ function fakeCollection(docs = []) {
   return {
     dados,
     async findOne(query) {
-      return (
-        dados.find((d) =>
-          Object.entries(query).every(([k, v]) =>
-            typeof v === "object" && v !== null && "$ne" in v ? d[k] !== v.$ne : d[k] === v
-          )
-        ) || null
-      );
+      return dados.find((d) => casa(d, query)) || null;
+    },
+    async updateMany(query, update) {
+      const alvos = dados.filter((d) => casa(d, query));
+
+      for (const doc of alvos) {
+        for (const [campo, valor] of Object.entries(update.$addToSet || {})) {
+          const lista = doc[campo] || (doc[campo] = []);
+          for (const item of valor.$each || [valor]) if (!lista.includes(item)) lista.push(item);
+        }
+        Object.assign(doc, update.$set || {});
+      }
+
+      return { modifiedCount: alvos.length };
     },
     async insertOne(doc) {
       dados.push({ _id: "novo" + dados.length, ...doc });
@@ -41,9 +59,20 @@ function fakeCollection(docs = []) {
 
 function monta(docs) {
   const col = fakeCollection(docs);
-  const roles = new Role_model({});
+  // A marca da migração das chaves de mensalidade mora em `configurations` —
+  // é ela que faz a herança acontecer uma vez na vida de cada cliente.
+  const configuracoes = fakeCollection();
+
+  const roles = new Role_model({
+    mongodb: {
+      async connectToServer() {
+        return { collection: (nome) => (nome === "configurations" ? configuracoes : col) };
+      },
+    },
+  });
+
   roles.collection = async () => col;
-  return { roles, col };
+  return { roles, col, configuracoes };
 }
 
 test.describe("ensureSystemRoles renomeia em vez de duplicar", () => {
@@ -154,4 +183,63 @@ test("os nomes ficam no modelo, não escritos à mão em cada controller", () =>
   assert.equal(roles.defaultName, "Usuário");
   assert.equal(roles.clientName, "Cliente");
   assert.equal(roles.adminName, "Administrador");
+});
+
+// ── A HERANÇA DAS CHAVES DE MENSALIDADE (15/10/2026) ─────────────────────
+//
+// `finance.recurrence`, `recurrenceDelete` e `recurrenceAmount` saíram de
+// dentro de `finance.manage`. O perigo de toda chave nova é o mesmo: ela
+// REVOGA em silêncio quem já fazia aquilo, e ninguém relaciona o botão que
+// sumiu com um deploy.
+test.describe("as chaves novas da mensalidade não tiram poder de ninguém", () => {
+  const NOVAS = ["finance.recurrence", "finance.recurrenceDelete", "finance.recurrenceAmount"];
+
+  test("quem tinha finance.manage herda as três", async () => {
+    const { roles, col } = monta([
+      { _id: "r9", name: "Recepção", permissions: ["finance.view", "finance.manage"] },
+    ]);
+
+    await roles.ensureSystemRoles();
+
+    const recepcao = col.dados.find((d) => d._id === "r9");
+    for (const chave of NOVAS) assert.ok(recepcao.permissions.includes(chave), chave);
+  });
+
+  test("quem NÃO tinha continua sem — a chave nova não distribui poder", async () => {
+    const { roles, col } = monta([
+      { _id: "r8", name: "Professor", permissions: ["workouts.view", "workouts.manage"] },
+    ]);
+
+    await roles.ensureSystemRoles();
+
+    const professor = col.dados.find((d) => d._id === "r8");
+    assert.deepEqual(professor.permissions, ["workouts.view", "workouts.manage"]);
+  });
+
+  test("o segundo boot NÃO ressuscita o que o admin tirou", async () => {
+    // É a razão de existir a marca em `configurations`. Sem ela, desmarcar as
+    // três na tela duraria até o próximo restart do servidor.
+    const { roles, col } = monta([
+      { _id: "r9", name: "Recepção", permissions: ["finance.view", "finance.manage"] },
+    ]);
+
+    await roles.ensureSystemRoles();
+
+    const recepcao = col.dados.find((d) => d._id === "r9");
+    recepcao.permissions = ["finance.view", "finance.manage"];
+
+    await roles.ensureSystemRoles();
+
+    assert.deepEqual(recepcao.permissions, ["finance.view", "finance.manage"]);
+  });
+
+  test("a marca é gravada uma vez só", async () => {
+    const { roles, configuracoes } = monta([]);
+
+    await roles.ensureSystemRoles();
+    await roles.ensureSystemRoles();
+
+    const marcas = configuracoes.dados.filter((d) => d.chave === "migracao_permissao_recorrencia");
+    assert.equal(marcas.length, 1);
+  });
 });

@@ -14,7 +14,7 @@ const OauthFacebook = require("../../model/OauthFacebook_model.js");
 
 const INSTANCIA = "marlon";
 
-function monta({ chaves, criarEstado, explode = false } = {}) {
+function monta({ chaves, criarEstado, explode = false, apple = false } = {}) {
   const estadosCriados = [];
 
   const app = fakeApp({
@@ -25,6 +25,12 @@ function monta({ chaves, criarEstado, explode = false } = {}) {
       oauthFacebook: {
         async chaves() {
           return { ligado: false, clientId: "", clientSecret: "" };
+        },
+      },
+      // A Apple (16/11/2026), pelo mesmo motivo: a rota pergunta a todos.
+      oauthApple: {
+        async chaves() {
+          return { ligado: apple, clientId: apple ? "vafit.app.login" : "", clientSecret: "" };
         },
       },
       oauthGoogle: {
@@ -146,6 +152,16 @@ test("os provedores que ainda não existem vêm como FALSO, não ausentes", asyn
   // Ausentes, o app teria de adivinhar a forma da resposta quando eles
   // chegarem. Declarados falsos, o botão nasce escondido e acende sozinho.
   assert.deepEqual(r.body, { google: false, facebook: false, apple: false });
+});
+
+test("a Apple acende sozinha quando a central a liga", async () => {
+  // O app instalado já tem o botão: é esta resposta que o faz aparecer, sem
+  // build novo.
+  const { app } = monta({ chaves: LIGADO, apple: true });
+
+  const r = await call(app, "get", "/public/social", { instance: null });
+
+  assert.deepEqual(r.body, { google: true, facebook: false, apple: true });
 });
 
 test("central fora do ar não derruba a tela de entrada do app", async () => {
@@ -303,7 +319,7 @@ test("bilhete vazio não vira consulta ao banco", async () => {
 //
 // O bilhete guarda para onde devolver a pessoa. Se esse endereço viesse do
 // cabeçalho sem conferência, qualquer um montaria um link de login que termina no
-// site dele — com uma sessão válida do GoFitNow no fragmento da URL.
+// site dele — com uma sessão válida da VAFIT no fragmento da URL.
 
 test("host de OUTRA instância não é guardado", async () => {
   const { m, guardados } = modeloComEstados({ "treino.bruna.com.br": "bruna" });

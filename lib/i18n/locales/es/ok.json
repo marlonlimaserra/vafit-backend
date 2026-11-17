@@ -1,7 +1,10 @@
 {
   "ok": {
+    "accessDeviceLinked": "Persona vinculada al lector.",
+    "accessDeviceRemoved": "Lector eliminado.",
     "accessRevoked": "Acceso revocado.",
     "apiKeyRevoked": "Clave revocada.",
+    "apiKeyToolsSaved": "Herramientas de la clave guardadas.",
     "appointmentRemoved": "Cita eliminada.",
     "assessmentEmailed": "Evaluación enviada por correo electrónico.",
     "assessmentRemoved": "Evaluación borrada.",
@@ -42,7 +45,7 @@
     "photoUpdated": "Foto actualizada.",
     "prescriptionRemoved": "Prescripción eliminada.",
     "recordRemoved": "Registro borrado.",
-    "recurrenceRemoved": "Recurrencia eliminada. Los cobros ya generados permanecen.",
+    "recurrenceRemoved": "Suscripción eliminada. Los cobros ya generados continúan.",
     "requestCancelled": "Solicitud cancelada.",
     "requestSent": "Solicitud enviada. La persona tiene que confirmar por correo.",
     "resetLinkSent": "Si existe una cuenta con ese correo, el enlace de restablecimiento fue enviado.",
@@ -53,13 +56,12 @@
     "supplementRemoved": "Suplemento eliminado.",
     "supplierRemoved": "Proveedor eliminado.",
     "supplyRemoved": "Insumo eliminado.",
+    "tabRemoved": "Pestaña eliminada.",
     "templateRemoved": "Plantilla eliminada.",
     "timeSheetEmailed": "Hoja de asistencia enviada por correo.",
     "unitRemoved": "Unidad eliminada.",
     "unitSaved": "Orden guardado.",
     "userRemoved": "Usuario eliminado.",
-    "workoutRemoved": "Entrenamiento eliminado.",
-    "accessDeviceRemoved": "Lector eliminado.",
-    "accessDeviceLinked": "Persona vinculada al lector."
+    "workoutRemoved": "Entrenamiento eliminado."
   }
 }

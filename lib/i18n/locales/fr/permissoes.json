@@ -7,6 +7,7 @@
     "lastAccountManagingRolesEdit": "C’est le dernier compte actif qui gère les permissions — promouvez-en un autre avant de modifier celui-ci.",
     "lastManagerGroup": "Ce groupe est celui qui vous donne le droit de gérer les permissions. Le supprimer bloquerait cet écran.",
     "lastRoleManagingRoles": "C’est le seul type qui gère encore les permissions, et c’est le vôtre. Donnez d’abord cette permission à un autre type.",
+    "needRolesManageToGrant": "Seul quelqu’un qui gère les permissions peut accorder ou modifier le pouvoir d’administrateur.",
     "noPermission": "Votre type d’utilisateur n’a pas la permission pour cela.",
     "roleNameTaken": "Un type portant ce nom existe déjà.",
     "roleNotFound": "Type d’utilisateur introuvable."
@@ -46,7 +47,7 @@
         "title": "Exercices"
       },
       "finance": {
-        "description": "Facturations, paiements et reçus",
+        "description": "Factures, abonnements et reçus",
         "title": "Facturation"
       },
       "foods": {
@@ -187,6 +188,18 @@
         "manage": {
           "hint": "Créer des factures et les solder. L’écran est en construction.",
           "label": "Gérer la facturation"
+        },
+        "recurrence": {
+          "hint": "Enregistrer le forfait souscrit, qui génère la facture tout seul.",
+          "label": "Créer et modifier des abonnements"
+        },
+        "recurrenceAmount": {
+          "hint": "Sans cela, le montant est toujours celui du forfait — aucune remise.",
+          "label": "Définir le montant de l'abonnement"
+        },
+        "recurrenceDelete": {
+          "hint": "Retirer l'abonnement. Les factures déjà générées restent.",
+          "label": "Supprimer des abonnements"
         },
         "view": {
           "hint": "Ouvrir l’onglet facturation et voir les factures. L’écran est en construction.",

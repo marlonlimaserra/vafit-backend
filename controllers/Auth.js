@@ -136,6 +136,28 @@ module.exports = function (app) {
     // Deliberately generic message: saying "this e-mail does not exist" would
     // reveal which addresses have an account. Same for a student whose access
     // has not been granted yet.
+    // ── SENHA CERTA, CONTA FECHADA: dizer o porquê (16/11/2026) ──────────
+    //
+    // Bloqueada ou desativada, com a senha CERTA: a resposta diz isso, em vez
+    // de "senha inválida" — que mandava a pessoa trocar uma senha que não
+    // estava errada. Só com a senha certa: sem ela, a mensagem continua a
+    // genérica, e ninguém descobre por aqui quem tem conta ou quem está
+    // bloqueado. E não conta como falha: não é força bruta, é a dona da conta.
+    if (!user) {
+      const motivo = await app.api.user.recusaComSenhaCerta(email, password);
+      if (motivo) {
+        app.insertUserActionHistory(req, null, "login_refused", {
+          category: "auth",
+          extra: { email: String(email).trim().toLowerCase(), motivo },
+        });
+        res.status(403).send({
+          msg: req.t(motivo === "bloqueado" ? "errors.accessBlocked" : "errors.accountInactive"),
+          code: motivo === "bloqueado" ? "acesso_bloqueado" : "conta_inativa",
+        });
+        return;
+      }
+    }
+
     if (!user) {
       // A tentativa que falha e a mais interessante do log: e ela que mostra
       // ataque de senha. O e-mail vai como digitado, sem confirmar se existe.

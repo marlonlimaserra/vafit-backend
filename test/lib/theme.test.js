@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 
 const theme = require("../../lib/theme.js");
 
-test("o tema padrão é válido e tem a marca do GoFitNow", () => {
+test("o tema padrão é válido e tem a marca da VAFIT", () => {
   const t = theme.defaults();
   assert.match(t.brand, /^#[0-9a-f]{6}$/i);
   assert.ok(theme.LAYOUTS.includes(t.layout));
@@ -543,7 +543,7 @@ test("o nome da aba tem teto — barra de navegador não é campo de texto", () 
 // O cartão que WhatsApp, LinkedIn e Google montam. Eles NÃO executam
 // JavaScript: leem o HTML cru, e é a função de borda que o reescreve.
 
-test("tudo vazio é o padrão do GoFitNow", () => {
+test("tudo vazio é o padrão da VAFIT", () => {
   const t = theme.sanitize({});
 
   assert.equal(t.metaTitle, "");

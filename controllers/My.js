@@ -1,4 +1,5 @@
 const { catalogoPara } = require("../lib/examMarkers.js");
+const tempo = require("../lib/tempo.js");
 
 // A ÁREA DA PESSOA: as rotas que o ALUNO usa para ver o que é dele.
 //
@@ -60,15 +61,18 @@ module.exports = function (app) {
     const eu = await aluno(req, res);
     if (eu === false) return;
 
-    const [treinos, dietas, exames, agenda] = await Promise.all([
+    const [treinos, dietas, exames, agenda, suplementos] = await Promise.all([
       app.api.workout.listOfStudent(eu._id),
       app.api.diet.listOfStudent(eu._id),
       app.api.exam.listOfStudent(eu._id),
       app.api.appointment.listAllOfStudent(eu._id),
+      app.api.supplement.listOfStudent(eu._id),
     ]);
 
     const agora = new Date();
     const proximo = agenda.find((a) => a.status !== "canceled" && new Date(a.date) >= agora);
+    // Suplemento só conta o de HOJE — é o que `/my/supplements` mostra.
+    const suplementosDeHoje = suplementos.filter((s) => s.status === "current").length;
 
     res.send({
       counts: {
@@ -76,19 +80,50 @@ module.exports = function (app) {
         // não é "o meu treino".
         workouts: treinos.filter((w) => w.status === "current").length,
         diets: dietas.filter((d) => d.status === "current").length,
+        supplements: suplementosDeHoje,
         exams: exames.length,
         appointments: agenda.filter((a) => a.status !== "canceled" && new Date(a.date) >= agora)
           .length,
+      },
+      // ── O QUE EXISTE ATRÁS DE CADA PORTA (16/11/2026) ──────────────────
+      //
+      // *"se não tem treino, não mostre; se não tem dieta, não mostre o
+      // botão"*. A porta (e o item do menu) some quando a tela atrás dela
+      // estaria VAZIA — e não quando o número de hoje é zero: quem só tem um
+      // treino encerrado ainda tem o histórico para abrir, e `/my/workouts`
+      // o mostra. Por isso é outra pergunta que `counts`.
+      //
+      // A agenda não entra: ela é também onde se MARCA, e existe sem nada
+      // marcado.
+      has: {
+        workouts: treinos.length > 0,
+        diets: dietas.length > 0,
+        supplements: suplementosDeHoje > 0,
+        exams: exames.length > 0,
       },
       nextAppointment: proximo || null,
     });
   });
 
+  // HOJE no relógio da CASA — a chave do treino concluído. "Fiz o treino de
+  // hoje" às 23h em São Paulo não pode cair no dia seguinte porque em UTC já
+  // virou.
+  async function hojeDaCasa() {
+    const fuso = await app.api.tenant.timezoneOfInstance().catch(() => undefined);
+    return tempo.paredeDe(new Date(), fuso).data;
+  }
+
+  const SEM_FEITO = { today: false, count: 0, last: null, exercises: [] };
+
   app.get("/my/workouts", async function (req, res) {
     const eu = await aluno(req, res);
     if (eu === false) return;
 
-    const rows = await app.api.workout.listOfStudent(eu._id);
+    const [lista, hoje] = await Promise.all([app.api.workout.listOfStudent(eu._id), hojeDaCasa()]);
+    // O concluído de cada treino, para o cartão dizer "feito hoje" — uma
+    // consulta para a lista inteira.
+    const feitos = await app.api.workout.feitosDaPessoa(eu._id, hoje);
+    const rows = lista.map((w) => ({ ...w, done: feitos[String(w._id)] || SEM_FEITO }));
 
     res.send({
       rows,
@@ -128,14 +163,95 @@ module.exports = function (app) {
       (workout.exercises || []).map((e) => e.exerciseId)
     );
 
+    const feitos = await app.api.workout.feitosDaPessoa(eu._id, await hojeDaCasa());
+
     res.send({
       ...workout,
       exercises: (workout.exercises || []).map((e) => {
         const c = clipes[String(e.exerciseId)];
         return c ? { ...e, ...c } : e;
       }),
+      done: feitos[String(workout._id)] || SEM_FEITO,
     });
   });
+
+  // ── CONCLUIR O TREINO DE HOJE (16/11/2026) ────────────────────────────────
+  //
+  // *"gostaria de marcar se foi concluído ou não"*. A pessoa marca (POST) e
+  // desmarca (DELETE) o treino de HOJE — o dia é o da casa, e quem decide é o
+  // servidor: um dia mandado pela tela deixaria marcar a semana inteira de
+  // uma vez.
+  //
+  // O treino tem de ser DELA (`dataOfStudent` filtra por eu): id de treino de
+  // outra pessoa responde 404, como na leitura.
+  async function treinoMeu(req, res) {
+    const eu = await aluno(req, res);
+    if (eu === false) return null;
+
+    const workout = await app.api.workout.dataOfStudent(eu._id, req.params.id);
+    if (!workout) {
+      res.status(404).send({ msg: req.t("errors.workoutNotFound") });
+      return null;
+    }
+    return { eu, workout };
+  }
+
+  app.post("/my/workouts/:id/done", async function (req, res) {
+    const achado = await treinoMeu(req, res);
+    if (!achado) return;
+
+    const hoje = await hojeDaCasa();
+    await app.api.workout.marcarFeito(achado.eu._id, achado.workout._id, hoje, (req.body || {}).origem);
+    const feitos = await app.api.workout.feitosDaPessoa(achado.eu._id, hoje);
+
+    res.send({ done: feitos[String(achado.workout._id)] || SEM_FEITO });
+  });
+
+  app.delete("/my/workouts/:id/done", async function (req, res) {
+    const achado = await treinoMeu(req, res);
+    if (!achado) return;
+
+    const hoje = await hojeDaCasa();
+    await app.api.workout.desmarcarFeito(achado.eu._id, achado.workout._id, hoje);
+    const feitos = await app.api.workout.feitosDaPessoa(achado.eu._id, hoje);
+
+    res.send({ done: feitos[String(achado.workout._id)] || SEM_FEITO });
+  });
+
+  // ── EXERCÍCIO A EXERCÍCIO (16/11/2026) ────────────────────────────────────
+  //
+  // *"queria concluir exercício por exercício"*. `:n` é a POSIÇÃO do exercício
+  // no treino (0, 1, 2…) — ver Workout_model.marcarExercicio. Marcar o último
+  // conclui o treino, e a resposta diz `completou: true` só nessa vez, para a
+  // tela comemorar uma vez só.
+  async function marcarExercicio(req, res, feito) {
+    const achado = await treinoMeu(req, res);
+    if (!achado) return;
+
+    const total = (achado.workout.exercises || []).length;
+    const n = Number(req.params.n);
+    if (!Number.isInteger(n) || n < 0 || n >= total) {
+      res.status(400).send({ msg: req.t("errors.workoutNotFound") });
+      return;
+    }
+
+    const hoje = await hojeDaCasa();
+    const { completou } = await app.api.workout.marcarExercicio(
+      achado.eu._id,
+      achado.workout._id,
+      hoje,
+      n,
+      feito,
+      total,
+      (req.body || {}).origem
+    );
+    const feitos = await app.api.workout.feitosDaPessoa(achado.eu._id, hoje);
+
+    res.send({ done: feitos[String(achado.workout._id)] || SEM_FEITO, completou: Boolean(completou) });
+  }
+
+  app.post("/my/workouts/:id/exercises/:n/done", (req, res) => marcarExercicio(req, res, true));
+  app.delete("/my/workouts/:id/exercises/:n/done", (req, res) => marcarExercicio(req, res, false));
 
   app.get("/my/diets", async function (req, res) {
     const eu = await aluno(req, res);
@@ -191,15 +307,20 @@ module.exports = function (app) {
     const validos = todos.filter((a) => a.status !== "canceled");
 
     // Quem atende, para a tela dizer "com a Bruna" — id sozinho não veste tela.
-    const nomes = new Map();
-    for (const a of validos) {
-      const id = String(a.trainer);
-      if (!nomes.has(id)) {
-        const quem = await app.api.user.data(a.trainer);
-        nomes.set(id, quem ? quem.name : "");
-      }
-    }
-    const vestido = (a) => ({ ...a, trainerName: nomes.get(String(a.trainer)) || "" });
+    //
+    // E a FOTO dela (16/11/2026): *"quando cliquei em ver minha agenda poderia
+    // aparecer a foto da pessoa que vai me atender"*. Vai o `avatarAt`, que é a
+    // versão; os bytes saem de `/avatars/:id`, que já serve qualquer conta da
+    // casa a quem está logado. Uma consulta para todos, e não uma por linha.
+    const fichas = await app.api.user.briefByIds(validos.map((a) => a.trainer));
+    const vestido = (a) => {
+      const f = fichas[String(a.trainer)];
+      return {
+        ...a,
+        trainerName: f?.name || "",
+        professional: f ? { _id: String(a.trainer), name: f.name, avatarAt: f.avatarAt || null } : null,
+      };
+    };
 
     res.send({
       upcoming: validos.filter((a) => new Date(a.date) >= agora).map(vestido),

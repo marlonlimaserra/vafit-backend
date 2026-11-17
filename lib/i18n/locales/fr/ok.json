@@ -1,7 +1,10 @@
 {
   "ok": {
+    "accessDeviceLinked": "Personne liée au lecteur.",
+    "accessDeviceRemoved": "Lecteur supprimé.",
     "accessRevoked": "Accès retiré.",
     "apiKeyRevoked": "Clé révoquée.",
+    "apiKeyToolsSaved": "Outils de la clé enregistrés.",
     "appointmentRemoved": "Rendez-vous supprimé.",
     "assessmentEmailed": "Bilan envoyé par e-mail.",
     "assessmentRemoved": "Évaluation supprimée.",
@@ -42,7 +45,7 @@
     "photoUpdated": "Photo mise à jour.",
     "prescriptionRemoved": "Prescription supprimée.",
     "recordRemoved": "Entrée supprimée.",
-    "recurrenceRemoved": "Récurrence supprimée. Les factures déjà générées restent.",
+    "recurrenceRemoved": "Abonnement supprimé. Les factures déjà générées restent.",
     "requestCancelled": "Demande annulée.",
     "requestSent": "Demande envoyée. La personne doit confirmer par e-mail.",
     "resetLinkSent": "S’il existe un compte avec cet e-mail, le lien de réinitialisation a été envoyé.",
@@ -53,13 +56,12 @@
     "supplementRemoved": "Complément supprimé.",
     "supplierRemoved": "Fournisseur supprimé.",
     "supplyRemoved": "Consommable supprimé.",
+    "tabRemoved": "Onglet supprimé.",
     "templateRemoved": "Modèle supprimé.",
     "timeSheetEmailed": "Feuille de présence envoyée par e-mail.",
     "unitRemoved": "Unité supprimée.",
     "unitSaved": "Ordre enregistré.",
     "userRemoved": "Utilisateur supprimé.",
-    "workoutRemoved": "Entraînement supprimé.",
-    "accessDeviceRemoved": "Lecteur supprimé.",
-    "accessDeviceLinked": "Personne liée au lecteur."
+    "workoutRemoved": "Entraînement supprimé."
   }
 }

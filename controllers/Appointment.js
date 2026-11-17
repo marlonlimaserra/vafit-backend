@@ -1,4 +1,6 @@
 const limiteDoPlano = require("../lib/limiteDoPlano.js");
+const { confirmarSemEsperar } = require("../lib/confirmacaoDeCompromisso.js");
+const { emitirAvulsa } = require("../lib/faturaNoGateway.js");
 module.exports = function (app) {
   // A agenda do profissional.
   //
@@ -62,6 +64,71 @@ module.exports = function (app) {
       // gera cobrança em dólar.
       await app.api.tenant.currencyFor(servico.currency)
     );
+  }
+
+  // ── A COBRANÇA DO COMPROMISSO, COMO PEDIDA NA TELA (16/11/2026) ──────────
+  //
+  // *"se eu escolher o serviço, poderia mostrar dois checkbox: gerar cobrança
+  // asaas se tiver disponível; se não tiver, aparece registrar cobrança — aí
+  // depois aparece ali na frente se foi pago ou não"*.
+  //
+  // `pedido` vem do corpo (`cobranca`):
+  //
+  //   ausente     → o comportamento de sempre: registra, se o serviço tem
+  //                 preço. É o que o app, o assistente e quem integra mandam —
+  //                 nenhum deles conhece as caixinhas, e não pode perder a
+  //                 cobrança que sempre nasceu.
+  //   "nenhuma"   → não cobra.
+  //   "registrar" → registra no financeiro (sem gateway).
+  //   "gateway"   → registra E abre a fatura no gateway (Asaas), como a caixa
+  //                 "gerar no gateway" do financeiro. Exige `finance.manage`:
+  //                 é cobrar alguém de verdade, fora daqui.
+  //
+  // A cobrança daqui nasce PRIMEIRO, e o gateway depois — se ele recusar, ela
+  // continua de pé e o motivo volta para a tela (`gatewayErro`). É a regra do
+  // financeiro: apagar o que acabou de ser lançado porque o Asaas estava fora
+  // seria perder o trabalho de quem lançou.
+  async function cobrarDoCompromisso(req, trainer, student, compromisso, pedido) {
+    const modo = pedido === undefined || pedido === null ? "registrar" : String(pedido);
+    if (modo !== "registrar" && modo !== "gateway") return {};
+
+    await gerarCobranca(req, trainer, student, compromisso);
+    const cobranca = await app.api.finance.chargeOfAppointment(compromisso._id);
+    if (!cobranca) return {};
+
+    // Daqui para baixo, NADA estoura: o compromisso e a cobrança daqui já
+    // estão gravados. Um erro agora viraria "não foi possível salvar" na tela,
+    // a pessoa tentaria de novo — e nasceria um SEGUNDO compromisso igual.
+    const extra = {};
+    if (modo === "gateway" && !cobranca.gateway?.pagamento) {
+      if (!app.helpers.ReqProtected.has(trainer, "finance.manage")) {
+        extra.gatewayErro = "sem_permissao";
+      } else {
+        try {
+          const feito = await emitirAvulsa(app, student, cobranca, {
+            ip: req.clientIp || "",
+            porQuem: trainer._id,
+          });
+          if (feito.ok) {
+            await app.api.finance.marcarNoGateway(cobranca._id, { pagamento: feito.id, url: feito.link });
+            extra.link = feito.link || "";
+          } else {
+            extra.gatewayErro = feito.erro || "fora_do_ar";
+          }
+        } catch (erro) {
+          console.error("[compromisso] gateway:", erro?.message);
+          extra.gatewayErro = "fora_do_ar";
+        }
+      }
+    }
+
+    try {
+      const resumos = await app.api.finance.cobrancasDosCompromissos([compromisso._id]);
+      return { cobranca: resumos[String(compromisso._id)] || null, ...extra };
+    } catch (erro) {
+      console.error("[compromisso] resumo da cobrança:", erro?.message);
+      return extra;
+    }
   }
 
   async function pessoaDoProfissional(req, res, trainer) {
@@ -130,6 +197,85 @@ module.exports = function (app) {
     );
 
     res.send({ rows: await comProfissionais(await comPessoas(rows)) });
+  });
+
+  // ── A LISTA: a aba "Compromissos" da agenda ─────────────────────────────
+  //
+  // *"quero ver em forma de lista nome foto dados do cliente etc... para eu não
+  // ter que ficar procurando no calendário"*.
+  //
+  // A MESMA janela e o MESMO alcance de `/appointments` (o filtro de
+  // profissionais vale igual, decidido aqui no servidor). O que muda é a pessoa
+  // de cada linha: em vez de só o nome, a ficha curta — foto, contato, unidade,
+  // objetivo, idade —, que é o que se procura quando se abre a lista para
+  // ligar, confirmar ou se preparar para o atendimento.
+  //
+  // ── O CONTATO SÓ VAI PARA QUEM PODE VER PESSOAS ─────────────────────────
+  //
+  // `schedule.view` não é `people.view`. Uma conta que marca horário e não
+  // enxerga a lista de pessoas não pode ganhar telefone e e-mail de todo mundo
+  // por esta porta lateral. Sem a permissão, a linha sai como na grade: nome e
+  // foto. O teste é pelo `ReqProtected.has` — a lista JÁ estreitada (inclusive
+  // pelo escopo de uma chave de API), e não pelo papel cru no banco.
+  //
+  // ── O TETO DA JANELA ────────────────────────────────────────────────────
+  //
+  // A tela pede no máximo 31 dias. O teto de 93 é para quem chama sem a tela:
+  // um `from=2000` não pode virar uma leitura da agenda inteira da casa, com
+  // ficha de cada pessoa junto.
+  const TETO_DA_LISTA_MS = 93 * 86400000;
+
+  app.get("/appointments/lista", async function (req, res) {
+    const trainer = await app.helpers.ReqProtected.can(req, res, "schedule.view");
+    if (trainer === false) return;
+
+    const de = new Date(String(req.query.from || ""));
+    let ate = new Date(String(req.query.to || ""));
+    if (Number.isNaN(de.getTime()) || Number.isNaN(ate.getTime()) || ate <= de) {
+      res.status(400).send({ msg: req.t("errors.requireRange") });
+      return;
+    }
+    if (ate - de > TETO_DA_LISTA_MS) ate = new Date(de.getTime() + TETO_DA_LISTA_MS);
+
+    const rows = await app.api.appointment.between(
+      await profissionaisVisiveis(req, trainer),
+      de.toISOString(),
+      ate.toISOString()
+    );
+
+    const fichas = await app.api.user.fichasDaAgendaByIds(rows.map((r) => r.student));
+    const veContato = app.helpers.ReqProtected.has(trainer, "people.view");
+    // "Pago ou não" é dado do FINANCEIRO: só sai para quem o enxerga.
+    const veFinanceiro = app.helpers.ReqProtected.has(trainer, "finance.view");
+    const cobrancas = veFinanceiro
+      ? await app.api.finance.cobrancasDosCompromissos(rows.map((r) => r._id))
+      : {};
+
+    const comFicha = rows.map((r) => {
+      const ficha = fichas[String(r.student)] || null;
+      const cobranca = cobrancas[String(r._id)] || null;
+      if (!ficha || veContato) return { ...r, person: ficha, cobranca };
+      // Sem a permissão: o que a grade já mostra, e mais nada.
+      return { ...r, person: { _id: ficha._id, name: ficha.name, avatarAt: ficha.avatarAt }, cobranca };
+    });
+
+    res.send({ rows: await comProfissionais(comFicha), contato: veContato, financeiro: veFinanceiro });
+  });
+
+  // A cobrança de UM compromisso — para o formulário aberto pelo calendário,
+  // cuja linha não traz a cobrança. Mesma regra da lista: `finance.view`.
+  app.get("/appointments/:id/cobranca", async function (req, res) {
+    const trainer = await app.helpers.ReqProtected.can(req, res, "finance.view");
+    if (trainer === false) return;
+
+    const compromisso = await app.api.appointment.data(await alcance(trainer), req.params.id);
+    if (!compromisso) {
+      res.status(404).send({ msg: req.t("errors.appointmentNotFound") });
+      return;
+    }
+
+    const resumos = await app.api.finance.cobrancasDosCompromissos([compromisso._id]);
+    res.send({ cobranca: resumos[String(compromisso._id)] || null });
   });
 
   app.get("/people/:personId/appointments", async function (req, res) {
@@ -214,7 +360,7 @@ module.exports = function (app) {
     //
     // Só na criação, e só uma vez por compromisso — `chargeOfAppointment`
     // garante que remarcar não gere uma segunda.
-    await gerarCobranca(req, trainer, student, criado);
+    const daCobranca = await cobrarDoCompromisso(req, trainer, student, criado, body.cobranca);
 
     app.insertUserActionHistory(req, trainer, "create_appointment", {
       category: "schedule",
@@ -225,7 +371,12 @@ module.exports = function (app) {
       extra: { person: student.name, personId: student._id + "", date: criado?.date },
     });
 
-    res.status(201).send(criado);
+    // A CONFIRMAÇÃO por e-mail — para a pessoa e para quem atende. Solta: a
+    // marcação já está gravada, e a tela não espera o SMTP. Ver
+    // lib/confirmacaoDeCompromisso.js.
+    confirmarSemEsperar(app, criado);
+
+    res.status(201).send({ ...criado, ...daCobranca });
   });
 
   app.put("/appointments/:id", async function (req, res) {
@@ -249,13 +400,22 @@ module.exports = function (app) {
     await app.api.appointment.update(permitidos, req.params.id, body, novoTrainer);
     const depois = await app.api.appointment.data(permitidos, req.params.id);
 
+    // Ao EDITAR, só se a tela pedir (`cobranca`): editar nunca gerou cobrança
+    // sozinho, e começar a gerar agora surpreenderia quem só mudou o horário.
+    // Se o compromisso já tem cobrança, `gerarCobranca` não cria outra.
+    let daCobranca = {};
+    if (body.cobranca === "registrar" || body.cobranca === "gateway") {
+      const student = await app.api.user.dataStudent(trainer._id, depois.student);
+      if (student) daCobranca = await cobrarDoCompromisso(req, trainer, student, depois, body.cobranca);
+    }
+
     app.insertUserActionHistory(req, trainer, "update_appointment", {
       category: "schedule",
       local: { target_type: "appointments", target_id: req.params.id + "" },
       diff: app.api.actionHistory.diff(antes, depois),
     });
 
-    res.send(depois);
+    res.send({ ...depois, ...daCobranca });
   });
 
   // Só o status: é o clique do fim da aula.

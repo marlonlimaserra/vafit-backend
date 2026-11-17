@@ -81,7 +81,7 @@ Center_model.prototype.collection = async function () {
 //
 // Qual instalação atende este cliente — e, na prática, qual BACKEND a tela dele
 // deve chamar. A lista mora em `environments`, no banco do painel, e quem a
-// edita é a Central (ver `gofitnow-center-backend/model/Environment_model.js`).
+// edita é a Central (ver `vafit-center-backend/model/Environment_model.js`).
 //
 // Aqui só se LÊ, e por um motivo de desenho: quem escreve é um painel, quem lê é
 // toda abertura de tela de login. Duas responsabilidades, dois lados.
@@ -916,7 +916,7 @@ Center_model.prototype.cobranca = async function () {
 // que se manda para o app de todo mundo é o que se escolheu mandar.
 // ── O CATÁLOGO DE LIMITES, DUPLICADO AQUI DE PROPÓSITO ────────────────────
 //
-// A lista que manda é a do painel (`gofitnow-center-backend/model/Plan_model.js`),
+// A lista que manda é a do painel (`vafit-center-backend/model/Plan_model.js`),
 // e ela é quem valida na ESCRITA. O problema é que validar na escrita não
 // alcança o que já está gravado: uma chave aposentada some do catálogo e
 // continua no documento de todo plano salvo antes da aposentadoria.
@@ -1319,7 +1319,7 @@ Center_model.prototype.removeHost = async function (instance, host) {
 //
 // A collection mora no banco CENTRAL, e não no do cliente, porque o pedido
 // precisa sobreviver à exclusão que ele pede — ver
-// `gofitnow-center-backend/model/DeletionRequest_model.js`, onde vive o modelo
+// `vafit-center-backend/model/DeletionRequest_model.js`, onde vive o modelo
 // completo. Aqui é só o lado de quem PEDE: registrar, consultar e desistir.
 //
 // Escrita à mão com `instance` no filtro: este banco é o central, e o Proxy de

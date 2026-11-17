@@ -160,6 +160,59 @@ test("a tela recebe `own`, e não o nome da instância", async () => {
   assert.ok(!("instance" in meu), "o nome da instância não precisa sair daqui");
 });
 
+// ── O VÍDEO DE TERCEIROS NÃO SAI DAQUI (21/10/2026) ──────────────────────
+//
+// *"vi que tem exercício com vídeo ou foto antiga de pessoas, pode remover"*.
+//
+// `videoUrl` é o link do YouTube de antes do clipe em 3D e `thumbUrl` é a capa
+// que o YouTube gera dele — a foto de uma pessoa desconhecida, de um canal
+// qualquer, dentro do nosso catálogo. Umas trezentas linhas ainda os têm
+// gravados, e vão continuar tendo: apagar mil e quatrocentos documentos que
+// valem para todos os clientes é irreversível, e deixar de mandar não é.
+//
+// Por isso a trava é AQUI, na saída. É o único ponto por onde o catálogo chega
+// à tela — painel, app e assistente — e uma tela nova nasce sem a foto sem
+// precisar saber que ela existiu.
+test("a foto antiga do YouTube não sai do banco para a tela", async () => {
+  const comFoto = {
+    _id: new ObjectId(),
+    name: "Alongamento de posterior",
+    instance: null,
+    videoUrl: "https://youtu.be/dQw4w9WgXcQ",
+    thumbUrl: "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg",
+  };
+  const { modelo } = monta([comFoto]);
+
+  const [daLista] = (await comoMarlon(() => modelo.list({ page: 1, limit: 20 }))).rows;
+  const porId = await comoMarlon(() => modelo.data(String(comFoto._id)));
+
+  for (const linha of [daLista, porId]) {
+    assert.equal(linha.name, "Alongamento de posterior", "o resto do exercício continua inteiro");
+    assert.ok(!("thumbUrl" in linha), "a capa do vídeo de terceiros não viaja");
+    assert.ok(!("videoUrl" in linha), "o link do vídeo de terceiros não viaja");
+  }
+});
+
+test("cadastrar ou editar não grava vídeo nenhum, nem que a rota mande", async () => {
+  // O campo saiu dos formulários, mas a rota continuaria aceitando de quem a
+  // chamasse direto — e aceitar o link é aceitar junto a capa dele.
+  const { modelo, escritas } = monta();
+
+  await comoMarlon(() =>
+    modelo.insert({ name: "Remada unilateral", videoUrl: "https://youtu.be/dQw4w9WgXcQ" })
+  );
+  await comoMarlon(() =>
+    modelo.update(String(MEU._id), { name: "Outro nome", videoUrl: "https://youtu.be/dQw4w9WgXcQ" })
+  );
+
+  const criado = escritas.find((e) => e.tipo === "insert").doc;
+  const alterado = escritas.find((e) => e.tipo === "update").mudanca.$set;
+
+  assert.ok(!("videoUrl" in criado) && !("thumbUrl" in criado));
+  assert.equal(alterado.name, "Outro nome", "o que a tela edita continua sendo gravado");
+  assert.ok(!("videoUrl" in alterado) && !("thumbUrl" in alterado));
+});
+
 test("mine=1 mostra só o que é meu — é a tela de Meus exercícios", async () => {
   const { modelo } = monta();
 
@@ -494,6 +547,44 @@ test("o binário do clipe não viaja na listagem de exercícios", async () => {
 
   assert.equal(linha.clipSlug, "rosca-direta");
   assert.ok(!("webp" in linha));
+});
+
+// ── O MOVIMENTO BASE VIAJA JUNTO (21/10/2026) ────────────────────────────
+//
+// *"agora consegue criar o vídeo de todos os outros exercícios?"*
+//
+// Um clipe por exercício não existe: são ~220 movimentos para 1.470 nomes. O
+// que passou a existir é o mesmo clipe servindo de BASE para as variações —
+// 444 exercícios com demonstração em vez de 32. A conta só fecha porque a tela
+// DIZ que é base, e para dizer ela precisa receber `clipBase`.
+//
+// A ficha do treino não lê o exercício do catálogo: ela pede os clipes por
+// `exerciseId`, e é por isso que o campo tem de estar na projeção. Sem ele, o
+// mesmo exercício apareceria marcado no catálogo e cru na ficha.
+
+test("a ficha do treino recebe a marca de movimento base", async () => {
+  const comBase = {
+    _id: new ObjectId(),
+    name: "Agachamento com salto no caixote",
+    instance: null,
+    clipSlug: "agachamento-livre",
+    clipBase: true,
+  };
+  const exato = {
+    _id: new ObjectId(),
+    name: "Agachamento livre",
+    instance: null,
+    clipSlug: "agachamento-livre",
+  };
+  const { modelo } = monta([comBase, exato]);
+
+  const mapa = await comoMarlon(() =>
+    modelo.clipesPorExercicio([String(comBase._id), String(exato._id)])
+  );
+
+  assert.equal(mapa[String(comBase._id)].clipBase, true);
+  assert.equal(mapa[String(exato._id)].clipBase, undefined, "o exato não pode vir marcado");
+  assert.equal(mapa[String(exato._id)].clipSlug, "agachamento-livre");
 });
 
 // ── A VERSÃO DO CLIPE VIAJA COM O EXERCÍCIO ──────────────────────────────

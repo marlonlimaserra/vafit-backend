@@ -19,6 +19,14 @@
       "text": "{{name}}, {{person}} reservó {{service}} para {{when}}. Contacto: {{contact}}. Abre la agenda: {{url}}",
       "title": "{{name}}, entró un horario en tu agenda"
     },
+    "chargeLink": {
+      "subject": "Tu cobro de {{valor}} — {{casa}}",
+      "title": "¡Hola, {{name}}!",
+      "body": "Aquí está el enlace para pagar el cobro de <strong>{{valor}}</strong>{{descricao}}.<br><br>Vencimiento: <strong>{{vencimento}}</strong><br><br>En el botón de abajo eliges cómo pagar.",
+      "button": "Pagar ahora",
+      "footer": "¿Ya pagaste? Ignora este correo: la baja entra sola.",
+      "text": "{{name}}, aquí está el enlace para pagar {{valor}}, con vencimiento el {{vencimento}}: {{url}}"
+    },
     "deletion": {
       "body": "Alguien pidió, desde dentro de tu cuenta, eliminarla. <strong>No se borró nada.</strong> Vamos a ponernos en contacto para entender qué pasó y acordar los próximos pasos — si de verdad quieres irte, lo resolvemos contigo.<br><br><strong>Si no fuiste tú</strong>, cancela la solicitud en la dirección de abajo y cambia tu contraseña.",
       "button": "Ver o cancelar la solicitud",
@@ -43,6 +51,30 @@
       "text": "{{name}}, {{trainerName}} habilitó tu acceso a VAFIT.\n\nEntra en {{url}} con el correo {{email}} y la contraseña acordada con {{trainerName}}.\n\n¿No sabes la contraseña? Usa \"Olvidé mi contraseña\" en la pantalla de inicio de sesión.",
       "title": "{{name}}, tu acceso está habilitado"
     },
+    "planUnit": {
+      "subject": "Nueva matrícula por el escaparate: {{plano}}",
+      "title": "{{person}} contrató {{plano}}",
+      "body": "Entró una matrícula por el escaparate, en la sede <strong>{{unidade}}</strong>.<br><br>Nombre: <strong>{{person}}</strong><br>CPF: {{cpf}}<br>WhatsApp: {{whatsapp}}<br>Correo: {{contact}}<br>Plan: <strong>{{plano}}</strong> — {{valor}}",
+      "button": "Abrir la ficha",
+      "footer": "La mensualidad ya está en las finanzas de esta persona. El cobro aparece cuando abras Finanzas.",
+      "text": "{{person}} contrató {{plano}} ({{unidade}}). CPF {{cpf}}, WhatsApp {{whatsapp}}, correo {{contact}}. Importe {{valor}}. Abre: {{url}}"
+    },
+    "planWelcome": {
+      "subject": "Tu matrícula en {{plano}} está creada",
+      "title": "¡Gracias, {{name}}!",
+      "body": "Tu matrícula en <strong>{{plano}}</strong> fue creada en la sede <strong>{{unidade}}</strong>.<br><br>Importe: <strong>{{valor}}</strong><br><br>El gimnasio hablará contigo sobre el pago y los próximos pasos.",
+      "button": "Hablar con el gimnasio",
+      "footer": "Si no fuiste tú, responde este correo y lo deshacemos.",
+      "text": "{{name}}, tu matrícula en {{plano}} ({{unidade}}) está creada. Importe: {{valor}}. El gimnasio hablará contigo sobre el pago."
+    },
+    "planWelcomePay": {
+      "body": "Tu matrícula en <strong>{{plano}}</strong> fue creada en la unidad <strong>{{unidade}}</strong>.<br><br>Importe: <strong>{{valor}}</strong><br>Vencimiento: <strong>{{vencimento}}</strong><br><br>Solo falta el pago. En el botón de abajo eliges cómo pagar.",
+      "button": "Pagar ahora",
+      "footer": "Si no fuiste tú, responde este correo y lo deshacemos.",
+      "subject": "Tu matrícula en {{plano}} fue creada — falta el pago",
+      "text": "{{name}}, tu matrícula en {{plano}} ({{unidade}}) fue creada. Importe: {{valor}}, vence el {{vencimento}}. Paga en: {{url}}",
+      "title": "¡Gracias, {{name}}!"
+    },
     "request": {
       "body": "<strong>{{professionalName}}</strong> ({{professionalEmail}}) quiere acompañarte en VAFIT.<br><br>Si das acceso, esta persona verá tu historial y armará planes junto con los otros profesionales que ya te cuidan. Puedes quitar este acceso cuando quieras.<br><br>El enlace vale por <strong>{{days}} días</strong>.",
       "button": "Ver y responder la solicitud",
@@ -64,6 +96,31 @@
     },
     "timeSheet": {
       "subject": "Tu hoja de asistencia"
+    },
+    "appointmentDefaultWhat": "Cita",
+    "appointmentPerson": {
+      "subject": "Cita confirmada — {{when}}",
+      "title": "{{name}}, tu cita está confirmada",
+      "body": "Está agendado: <strong>{{what}}</strong> con <strong>{{professional}}</strong>.<br><br>Cuándo: <strong>{{when}}</strong><br>Duración: {{duration}}<br>Dónde: {{place}}",
+      "button": "Ver en la app",
+      "footer": "El archivo adjunto agrega esta cita al calendario de tu celular. Si no puedes ir, avisa a {{professional}} con anticipación.",
+      "text": "{{name}}, está agendado: {{what}} con {{professional}}, {{when}} ({{duration}}), en {{place}}. Velo en la app: {{url}}"
+    },
+    "appointmentPersonNoApp": {
+      "subject": "Cita confirmada — {{when}}",
+      "title": "{{name}}, tu cita está confirmada",
+      "body": "Está agendado: <strong>{{what}}</strong> con <strong>{{professional}}</strong>.<br><br>Cuándo: <strong>{{when}}</strong><br>Duración: {{duration}}<br>Dónde: {{place}}",
+      "button": "Ver en la app",
+      "footer": "El archivo adjunto agrega esta cita al calendario de tu celular. Si no puedes ir, avisa a {{professional}} con anticipación.",
+      "text": "{{name}}, está agendado: {{what}} con {{professional}}, {{when}} ({{duration}}), en {{place}}."
+    },
+    "appointmentProfessional": {
+      "subject": "Agendado: {{person}} — {{when}}",
+      "title": "{{name}}, entró una cita en tu agenda",
+      "body": "<strong>{{what}}</strong> con <strong>{{person}}</strong>.<br><br>Cuándo: <strong>{{when}}</strong><br>Duración: {{duration}}<br>Contacto: {{contact}}",
+      "button": "Abrir la agenda",
+      "footer": "El archivo adjunto agrega la cita a tu calendario. Para reprogramar o cancelar, usa la agenda.",
+      "text": "{{name}}, nueva cita en tu agenda: {{what}} con {{person}}, {{when}} ({{duration}}). Contacto: {{contact}}. Abre la agenda: {{url}}"
     }
   }
 }

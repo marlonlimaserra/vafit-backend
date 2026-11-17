@@ -1,6 +1,7 @@
 const { ObjectId } = require("mongodb");
 const iconeGuardado = require("../lib/iconeGuardado.js");
 const cep = require("../lib/cep.js");
+const apelido = require("../lib/apelidoDeUnidade.js");
 
 // AS UNIDADES DA CASA — "Centro", "Barra", "Zona Sul".
 //
@@ -63,6 +64,12 @@ Unit_model.prototype.collection = async function () {
 // e nada barra o caminho — o CEP é um atalho, nunca uma cerca.
 const CAMPOS = {
   name: (v) => String(v || "").trim().slice(0, 80),
+  // ── O APELIDO, que vira endereço ───────────────────────────────────────
+  //
+  // `/vitrine/niteroi`. Nasce do nome e só muda quando alguém o edita — ver
+  // `lib/apelidoDeUnidade.js` para por que não é o id nem o nome derivado na
+  // hora de ler. Vazio aqui não é erro: `insert` o inventa a partir do nome.
+  alias: (v) => apelido.normalizar(v),
   // A frase curta: "Ao lado do metrô", "Entrada pela lateral".
   tagline: (v) => String(v || "").trim().slice(0, 120),
   cep: (v) => String(v || "").trim().slice(0, 20),
@@ -152,6 +159,46 @@ Unit_model.prototype.data = async function (id) {
   return (await col.findOne({ _id: new ObjectId(id) })) || undefined;
 };
 
+// O primeiro apelido livre a partir de uma base: `centro`, `centro-2`, ...
+//
+// Laço e não um sufixo aleatório de primeira: quase sempre a primeira
+// tentativa serve, e um endereço é feito para ser ditado por telefone.
+// `fora` deixa a própria unidade de fora na hora de editar — senão ela
+// colidiria consigo mesma e viraria `centro-2` a cada gravação.
+Unit_model.prototype.apelidoLivre = async function (base, fora) {
+  const col = await this.collection();
+  const inicial = apelido.normalizar(base) || "unidade";
+
+  for (let n = 1; n < 50; n += 1) {
+    const tentativa = n === 1 ? inicial : apelido.proxima(inicial, n);
+    const filtro = { alias: tentativa };
+    if (fora) filtro._id = { $ne: new ObjectId(String(fora)) };
+
+    if (!(await col.findOne(filtro))) return tentativa;
+  }
+
+  // Cinquenta "Centro" na mesma academia não acontece. Se acontecer, o
+  // carimbo de tempo resolve sem derrubar a gravação.
+  return apelido.proxima(inicial, Date.now() % 100000);
+};
+
+// As unidades que já existiam quando o apelido passou a existir (14/10/2026).
+// Roda a cada boot e só escreve em quem não tem — uma academia que renomeou o
+// apelido não o perde no deploy seguinte.
+Unit_model.prototype.semearApelidos = async function () {
+  const col = await this.collection();
+  const sem = await col.find({ $or: [{ alias: { $exists: false } }, { alias: "" }] }).toArray();
+
+  for (const u of sem) {
+    await col.updateOne(
+      { _id: u._id },
+      { $set: { alias: await this.apelidoLivre(u.name, u._id), updatedAt: new Date() } }
+    );
+  }
+
+  return { criados: sem.length };
+};
+
 Unit_model.prototype.insert = async function (obj) {
   const col = await this.collection();
 
@@ -169,6 +216,10 @@ Unit_model.prototype.insert = async function (obj) {
   // A linha única é DERIVADA das partes, e nunca vem da tela: duas fontes para
   // o mesmo endereço divergem na primeira edição.
   doc.endereco = cep.umaLinha(doc);
+
+  // Quem cadastra uma unidade não quer pensar em endereço de URL. O apelido
+  // nasce do nome, e fica editável para o dia em que alguém quiser.
+  doc.alias = await this.apelidoLivre(doc.alias || doc.name);
 
   await iconeGuardado.aplicar(doc, null, ICONE);
 
@@ -192,6 +243,16 @@ Unit_model.prototype.update = async function (id, obj) {
 
   const antes = await col.findOne({ _id: new ObjectId(id) });
   await iconeGuardado.aplicar(mudanca, antes, ICONE);
+
+  // ── O APELIDO NUNCA FICA VAZIO ─────────────────────────────────────────
+  //
+  // Apagar o campo na tela não pode tirar a unidade do ar: sem apelido ela
+  // some de `/vitrine/<x>` e o link que a academia espalhou morre calado.
+  // Vazio volta a ser o nome; repetido ganha sufixo.
+  if (mudanca.alias !== undefined || (!antes?.alias && mudanca.name)) {
+    const base = mudanca.alias || antes?.alias || mudanca.name || antes?.name;
+    mudanca.alias = await this.apelidoLivre(base, id);
+  }
 
   // A linha única se refaz a cada gravação, sobre o documento COMPLETO: uma
   // edição que mexe só no número precisa da rua que já estava lá, e montá-la
@@ -248,6 +309,15 @@ Unit_model.prototype.remove = async function (id) {
     await this.app.api.unitImage.removeAllOf(id);
   } catch (erro) {
     console.error("[unidades] fotos da unidade apagada:", erro?.message || erro);
+  }
+
+  // E AS CHAVES DO GATEWAY também. Guardar a credencial de cobrança de uma
+  // filial que não existe mais é manter vivo um segredo que ninguém vigia —
+  // a mesma razão de desligar um gateway apagar a linha em vez de marcá-la.
+  try {
+    await this.app.api.paymentGateway.apagarDaUnidade(id);
+  } catch (erro) {
+    console.error("[unidades] chaves da unidade apagada:", erro?.message || erro);
   }
 
   return r.deletedCount > 0;

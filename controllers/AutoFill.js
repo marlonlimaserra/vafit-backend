@@ -19,6 +19,10 @@ module.exports = function (app) {
     const user = await app.helpers.ReqProtected.verify(req, res);
     if (user === false) return;
 
+    // Os campos com valor padrão (as durações do compromisso) recebem esse
+    // padrão na primeira leitura — e só nela. Ver AutoFill_model.semear.
+    await app.api.autoFill.semear(user._id);
+
     // Com `?field=` devolve a lista daquele campo (é o que o formulário pede);
     // sem ele, tudo agrupado (é o que o perfil desenha).
     if (req.query.field) {
@@ -39,6 +43,20 @@ module.exports = function (app) {
       res.status(400).send({ msg: req.t("errors.invalidField") });
       return;
     }
+    // Campo NUMÉRICO (minutos): a regra é de número, não de frase — "5" tem
+    // um caractere e é válido; "6000" tem quatro e não é.
+    if (fields.campo(field)?.numeric) {
+      const minutos = fields.minutosValidos(value);
+      if (minutos === null) {
+        res.status(400).send({
+          msg: req.t("errors.invalidMinutes", { min: fields.MINUTOS_MIN, max: fields.MINUTOS_MAX }),
+        });
+        return;
+      }
+      res.status(201).send(await app.api.autoFill.insert(user._id, field, String(minutos)));
+      return;
+    }
+
     if (!value || String(value).trim().length < 2) {
       res.status(400).send({ msg: req.t("errors.requireText") });
       return;

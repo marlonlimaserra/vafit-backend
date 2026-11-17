@@ -8,7 +8,7 @@ const calculos = require("../../lib/calculos.mjs");
 // AS FÓRMULAS DA AVALIAÇÃO SÃO ESPELHADAS DO SITE.
 //
 // `lib/calculos.mjs` é cópia byte a byte de
-// `gofitnow-frontend/src/views/student/assessments/calculos.js`, feita por
+// `vafit-frontend/src/views/student/assessments/calculos.js`, feita por
 // `scripts/formulasDoSite.mjs`.
 //
 // Elas vieram para cá porque o DOCUMENTO da avaliação (folha, PDF, e-mail) passa
@@ -20,7 +20,7 @@ test("a cópia é idêntica à fonte, tirando o aviso", () => {
   const daqui = path.join(__dirname, "..", "..", "lib", "calculos.mjs");
   const doSite = path.join(
     __dirname, "..", "..", "..",
-    "gofitnow-frontend", "src", "views", "student", "assessments", "calculos.js"
+    "vafit-frontend", "src", "views", "student", "assessments", "calculos.js"
   );
 
   // Fora do monorepo do dev (CI do backend sozinho) o teste não se aplica.

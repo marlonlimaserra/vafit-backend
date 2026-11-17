@@ -2,7 +2,7 @@ const { ObjectId } = require("mongodb");
 
 // O SUPORTE, do lado de quem PAGA por ele.
 //
-// O profissional abre um chamado daqui; quem responde é a equipe da GoFitNow, no
+// O profissional abre um chamado daqui; quem responde é a equipe da VAFIT, no
 // painel. Não é o suporte que ele dá aos alunos dele — é o que ele recebe da
 // gente.
 //

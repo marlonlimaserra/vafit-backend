@@ -58,6 +58,10 @@ const POR_INSTANCIA = [
   "connection_choices",
   "user_tokens",
   "workouts",
+  // O TREINO CONCLUÍDO (16/11/2026): um documento por (pessoa, treino, dia),
+  // marcado pela própria pessoa no app ou no web. Do cliente, e dado da pessoa:
+  // sai junto quando ela é apagada (ver Workout_model.deleteAllOfStudent).
+  "workout_logs",
   "diets",
   "anamnesis",
   "anamnesis_links",
@@ -107,6 +111,13 @@ const POR_INSTANCIA = [
   // OS DEPARTAMENTOS — Financeiro, Vendas, Suporte. Do cliente: é a divisão
   // interna DELE, e é por onde o chat vai separar as filas.
   "departments",
+  // AS ABAS COMPARTILHADAS DO PAINEL — a tela que a casa abre de manhã, montada
+  // por quem administra e endereçada a um público (todos, um papel, um
+  // departamento, uma pessoa). Do cliente: é a curadoria DELE.
+  //
+  // A aba PESSOAL continua em `user.preferences.painel.abas`, onde nasceu. Só
+  // o que tem público vira documento — porque só aí "quem pode ver" existe.
+  "dashboard_tabs",
   // OS FORNECEDORES — quem recebe o dinheiro que sai, e a foto de cada um.
   // Do cliente: a lista de quem uma academia paga é dela.
   "suppliers",
@@ -148,6 +159,9 @@ const POR_INSTANCIA = [
   "access_device_pendings",
   "access_device_commands",
   "access_device_events",
+  // O diário dos avisos do gateway, por cliente: o que o Asaas mandou e o que
+  // foi feito com cada aviso. Ver `model/AvisoDoGateway_model.js`.
+  "gateway_webhook_logs",
   // O que o aparelho RECUSOU, guardado à parte para tratarmos depois — metade
   // é defeito nosso, descoberto só quando o firmware diz não.
   "access_device_errors",
@@ -197,6 +211,14 @@ const POR_INSTANCIA = [
   // varreria as categorias de todos os clientes.
   "recipe_categories",
   "payment_methods",
+  // Por ONDE a casa cobra os alunos dela: o Asaas ou o Pagar.me DELA, com a
+  // chave de API dela. Do cliente pela mesma razão do token de Instagram — é a
+  // conta de cobrança dele, e o dinheiro cai na conta dele.
+  "payment_gateways",
+  // OS CARTÕES guardados de cada aluno — ou melhor, os TOKENS deles. Do
+  // cliente, e sem discussão: é a credencial de cobrança de uma pessoa que
+  // ele atende, e ela só vale na conta de gateway dele.
+  "saved_cards",
   "auto_fill_values",
   "avatars",
   "brand_images",
@@ -270,12 +292,15 @@ async function ensureCentral(app) {
   //
   // A ordenação e a busca usam `nameSort` (nome sem acento, minúsculo) — ver
   // Exercise_model.
-  // `hasVideo` na frente do nome: a lista mostra os que têm demonstração
-  // primeiro e os sem vídeo no fim. Sem ele no índice, essa ordenação passaria a
-  // ser feita na memória, com mil e quatrocentos documentos por página.
-  await db
-    .collection("exercises")
-    .createIndex({ instance: 1, hasVideo: -1, nameSort: 1 }, { name: "by_instance_video_name" });
+  // `by_instance_video_name` NÃO É CRIADO MAIS (21/10/2026). Ele punha
+  // `hasVideo` na frente do nome, para a lista mostrar quem tinha demonstração
+  // primeiro — e `hasVideo` era "tem link do YouTube", que saiu do produto
+  // junto com o vídeo de terceiros. Quem responde isso hoje é `clipSlug`, e o
+  // filtro de demonstração é por existência, não por ordenação.
+  //
+  // Quem já tem o índice continua com ele: é inofensivo (ninguém escreve o
+  // campo) e derrubá-lo é operação no banco compartilhado, que não se faz de
+  // passagem. Instalação nova simplesmente não o ganha.
   await db.collection("exercises").createIndex({ instance: 1, nameSort: 1 }, { name: "by_instance_name" });
   await db
     .collection("exercises")
@@ -648,6 +673,20 @@ async function ensureUmBanco(db, opcoes) {
   // Ordenar por nome do treino, também dentro do escopo do profissional.
   await db.collection("workouts").createIndex({ instance: 1, trainer: 1, name: 1 }, { name: "by_trainer_name" });
 
+  // ── O TREINO CONCLUÍDO ───────────────────────────────────────────────────
+  //
+  // ÚNICO por (pessoa, treino, dia): marcar duas vezes no mesmo dia — o toque
+  // repetido, a rede que reenvia — continua sendo UM treino feito. É o índice
+  // que garante, e não a tela.
+  await db
+    .collection("workout_logs")
+    .createIndex({ instance: 1, student: 1, workout: 1, day: 1 }, { name: "um_por_dia", unique: true });
+  // E a pessoa inteira, do mais recente para trás — "quantos treinos esta
+  // semana", na ficha um dia e na tela dela hoje.
+  await db
+    .collection("workout_logs")
+    .createIndex({ instance: 1, student: 1, day: -1 }, { name: "by_student_day" });
+
   // diets — sempre listados por (trainer, student), do mais novo para o mais
   // antigo, que é a ordem da aba Dieta dentro da pessoa.
   await db
@@ -708,6 +747,12 @@ async function ensureUmBanco(db, opcoes) {
 
   // E o número, para achar pelo que a pessoa dita no telefone.
   await db.collection("charges").createIndex({ instance: 1, numero: 1 }, { name: "by_numero" });
+  // O GRUPO do parcelamento. A aba agrega por ele, e o webhook de uma parcela
+  // chega com o grupo de lá — é por aqui que se acha a família inteira.
+  // Esparso: a esmagadora maioria das cobranças não é parcela de nada.
+  await db
+    .collection("charges")
+    .createIndex({ instance: 1, installment: 1 }, { name: "by_installment", sparse: true });
   await db.collection("payments").createIndex({ instance: 1, numero: 1 }, { name: "by_numero" });
 
   // ── O NÚMERO PARA QUEM JÁ EXISTIA ──────────────────────────────────────
@@ -788,6 +833,35 @@ async function ensureUmBanco(db, opcoes) {
   // conta inteira (é o que o Financeiro geral e a rotina diária fazem).
   await db.collection("recurrences").createIndex({ instance: 1, student: 1 }, { name: "by_student" });
   await db.collection("recurrences").createIndex({ instance: 1, status: 1 }, { name: "by_status" });
+  // E PELA ASSINATURA DO GATEWAY: é por aqui que o aviso de pagamento acha o
+  // dono. Ele chega sem sessão, dizendo só o id da assinatura lá do Asaas, e
+  // sem índice essa busca varreria todas as recorrências da conta a cada
+  // pagamento recebido.
+  //
+  // PARCIAL porque a esmagadora maioria das regras não tem gateway nenhum: um
+  // índice cheio de nulos pesa na escrita de quem nunca vai consultá-lo.
+  await db.collection("recurrences").createIndex(
+    { instance: 1, "gateway.assinatura": 1 },
+    {
+      name: "by_gateway_subscription",
+      partialFilterExpression: { "gateway.assinatura": { $type: "string" } },
+    }
+  );
+
+  // E A COBRANÇA PELO ID DA FATURA no gateway. Mesma história um nível
+  // abaixo: o aviso diz "a fatura pay_x mudou", e a partir do segundo aviso
+  // de cada fatura é por aqui que ela é encontrada — por identidade, não pelo
+  // vencimento, que deixa de casar quando alguém muda a data no painel do
+  // Asaas.
+  //
+  // Parcial pela mesma razão: quase nenhuma cobrança nasceu num gateway.
+  await db.collection("charges").createIndex(
+    { instance: 1, "gateway.pagamento": 1 },
+    {
+      name: "by_gateway_payment",
+      partialFilterExpression: { "gateway.pagamento": { $type: "string" } },
+    }
+  );
 
   // memberships e membership_categories — listas curtas, sempre lidas inteiras e
   // sempre na ORDEM escolhida (a da vitrine, e a das linhas da tabela).
@@ -902,6 +976,13 @@ async function ensureUmBanco(db, opcoes) {
     .collection("departments")
     .createIndex({ instance: 1, key: 1 }, { unique: true, name: "key_unica" });
   await db.collection("departments").createIndex({ instance: 1, ordem: 1 }, { name: "by_ordem" });
+
+  // As abas do painel: a faixa as empilha por `ordem`, e a busca de "quais são
+  // as minhas" filtra por `ativo` antes de olhar o público. O índice cobre as
+  // duas, que são as únicas consultas que existem sobre esta coleção.
+  await db
+    .collection("dashboard_tabs")
+    .createIndex({ instance: 1, ativo: 1, ordem: 1 }, { name: "by_ordem" });
 
   // ── NOME E SOBRENOME NAS FICHAS QUE JÁ EXISTEM ──────────────────────────
   //
@@ -1186,11 +1267,51 @@ async function ensureUmBanco(db, opcoes) {
     .collection("access_device_events")
     .createIndex({ em: 1 }, { name: "faxina", expireAfterSeconds: 3 * 24 * 60 * 60 });
 
+  // ── O DIÁRIO DOS AVISOS DO GATEWAY ─────────────────────────────────────
+  //
+  // *"coloque 'log asaas' para a gente poder ver o que chegou, se foi
+  // processado ou não"* (19/10/2026).
+  //
+  // TRINTA DIAS, e não três como o dos leitores: a pergunta aqui não é "o que
+  // houve ontem à noite", é "por que a mensalidade de outubro não baixou" —
+  // e essa se faz quando alguém fecha o mês. Cada linha tem uns 2 KB, então
+  // um mês de uma academia movimentada cabe em poucos megabytes.
+  //
+  // O TTL é de campo ÚNICO de propósito: com `instance` na frente o Mongo não
+  // expira nada, e a faxina falharia em silêncio. O compound ao lado é o que
+  // serve a tela, que sempre lê por cliente e em ordem de chegada.
+  await db
+    .collection("gateway_webhook_logs")
+    .createIndex({ em: 1 }, { name: "faxina", expireAfterSeconds: 30 * 24 * 60 * 60 });
+  await db
+    .collection("gateway_webhook_logs")
+    .createIndex({ instance: 1, em: -1 }, { name: "por_chegada" });
+  await db
+    .collection("gateway_webhook_logs")
+    .createIndex({ instance: 1, pagamento: 1 }, { name: "por_fatura" });
+
   // ── AS UNIDADES ────────────────────────────────────────────────────────
   //
   // Lista curta, sempre lida inteira e sempre na ordem escolhida — a mesma
   // forma dos planos.
   await db.collection("units").createIndex({ instance: 1, order: 1 }, { name: "by_order" });
+  // ── O APELIDO É ÚNICO DENTRO DA CASA ──────────────────────────────────
+  //
+  // É ele que resolve `/vitrine/niteroi`, e duas unidades com o mesmo apelido
+  // fariam a página mostrar uma delas — sempre a mesma, por ordem de
+  // documento, e sem erro nenhum. O modelo já procura um livre antes de
+  // gravar; o índice é quem garante quando duas abas gravam ao mesmo tempo.
+  //
+  // PARCIAL: a unidade que ainda não foi semeada não tem o campo, e sem o
+  // filtro todas as sem-apelido colidiriam entre si no mesmo `null`.
+  await db.collection("units").createIndex(
+    { instance: 1, alias: 1 },
+    {
+      unique: true,
+      partialFilterExpression: { alias: { $type: "string" } },
+      name: "apelido_unico",
+    }
+  );
   // A foto é sempre buscada pela unidade dona: é assim que a faxina acha o que
   // ninguém referencia mais.
   await db.collection("unit_images").createIndex({ instance: 1, unit: 1 }, { name: "by_unit" });
@@ -1404,6 +1525,58 @@ async function ensureUmBanco(db, opcoes) {
   await db.collection("payment_methods").createIndex({ instance: 1, order: 1 }, { name: "by_order" });
   await db.collection("payment_methods").createIndex({ instance: 1, key: 1 }, { unique: true, name: "key_unique" });
 
+  // ── payment_gateways: um por tipo, e NO MÁXIMO UM ATIVO ────────────────
+  //
+  // O primeiro índice é o de sempre: uma linha por gateway, porque colar uma
+  // chave nova substitui a anterior — duas linhas do mesmo gateway fariam a
+  // cobrança sair por uma e a conferência olhar a outra.
+  //
+  // O SEGUNDO é a regra do pedido, e ela é estrutural de propósito: *"só vai
+  // poder escolher por onde as faturas e assinaturas serão geradas"*. Único
+  // PARCIAL — ele só vale para quem tem `ativo: true`, então os desligados
+  // convivem à vontade e dois ativos são impossíveis.
+  //
+  // Um `if` no modelo perderia a corrida entre duas abas, e o estrago seria
+  // silencioso: dois ativos, e a cobrança sai por quem o `findOne` devolver
+  // primeiro naquele dia.
+  //
+  // ── E A UNIDADE ENTROU NOS DOIS (14/10/2026) ───────────────────────────
+  //
+  // *"acho que cada filial terá que ter suas chaves de gateway de pagamento
+  // também"*. Com isso "um por tipo" virou "um por tipo POR UNIDADE", e "no
+  // máximo um ativo" virou "no máximo um ativo POR UNIDADE".
+  //
+  // Sem o `unit` nas duas chaves, a segunda filial a colar uma chave do Asaas
+  // seria recusada por duplicidade — e ativá-la desligaria a da casa. Os
+  // índices velhos SAEM: deixá-los de pé manteria a recusa.
+  //
+  // `unit: null` é a casa, e `null` é um valor como outro qualquer para o
+  // índice — é por isso que o modelo grava `null` explícito em vez de omitir
+  // o campo.
+  for (const morto of ["gateway_unico", "um_ativo_so"]) {
+    await dropIndexIfPresent(db, "payment_gateways", morto);
+  }
+
+  await db
+    .collection("payment_gateways")
+    .createIndex({ instance: 1, unit: 1, tipo: 1 }, { unique: true, name: "gateway_unico_na_unidade" });
+  await db.collection("payment_gateways").createIndex(
+    { instance: 1, unit: 1, ativo: 1 },
+    { unique: true, partialFilterExpression: { ativo: true }, name: "um_ativo_so_na_unidade" }
+  );
+
+  // ── saved_cards: a lista é SEMPRE de uma pessoa ────────────────────────
+  //
+  // E o token é único por pessoa: o Asaas devolve o mesmo para o mesmo cartão
+  // do mesmo cliente, então guardar o mesmo cartão duas vezes viraria duas
+  // linhas iguais na tela — e uma delas "principal" e a outra não.
+  await db
+    .collection("saved_cards")
+    .createIndex({ instance: 1, user: 1, criadoEm: -1 }, { name: "by_person" });
+  await db
+    .collection("saved_cards")
+    .createIndex({ instance: 1, user: 1, token: 1 }, { unique: true, name: "token_unico" });
+
   // workout_templates — sempre lidos por profissional, em ordem alfabética.
   // recipe_categories — lida inteira, em ordem de nome: são poucas por cliente.
   await db
@@ -1595,8 +1768,34 @@ async function ensureInstanceEssencial(app, instance, { contaNova = false } = {}
     //
     // Idempotente por alias, como a de cima: um segundo boot não desfaz um
     // "Objetivo" renomeado para "Meta".
-    await app.api.customFieldGroup.semear();
-    await app.api.customField.semear();
+    // A segunda recebe o que a primeira acabou de criar: os campos de cobrança
+    // (endereço e CPF) entram UMA vez, junto com a gaveta `endereco`. Ver o
+    // comentário em `CustomField_model.semear` — por alias, um campo apagado
+    // pela casa voltaria no boot seguinte.
+    // O apelido da unidade, para as que nasceram antes dele existir. Sem isso
+    // elas somem de `/vitrine/<apelido>` — e some sem erro, que é pior.
+    await app.api.unit.semearApelidos();
+
+    const gaveta = await app.api.customFieldGroup.semear();
+    await app.api.customField.semear({ gruposNovos: gaveta.novos || [] });
+
+    // ── CONSERTO DO MESMO DIA: o CEP semeado nasceu como `texto` ──────────
+    //
+    // Semeei a gaveta `endereco` de manhã e só à tarde descobri, com ele
+    // olhando a tela, que `texto` não põe o hífen nem preenche o resto —
+    // *"cep não tá colocando - e não preenche o endereço automático"*. O tipo
+    // `cep` passou a existir depois, e TIPO NÃO SE TROCA pela tela de
+    // propósito: as respostas estão guardadas sob ele.
+    //
+    // Aqui a troca é segura porque o campo tem horas de vida e resposta
+    // nenhuma — foi este servidor que o criou. O filtro é estreito de
+    // propósito: só o que ESTE semeador escreveu, na gaveta que ele criou.
+    //
+    // Pode sair daqui depois que as oito instâncias tiverem rodado uma vez.
+    await (await app.api.customField.collection()).updateMany(
+      { alias: "cep", grupo: "endereco", tipo: "texto", nativo: false },
+      { $set: { tipo: "cep", updatedAt: new Date() } }
+    );
 
     // ── A MIGRAÇÃO `tenants` → `configurations`, POR CLIENTE ────────────────
     //

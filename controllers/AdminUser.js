@@ -88,6 +88,21 @@ module.exports = function (app) {
     }
     if (!role) role = await app.api.role.dataByName(app.api.role.defaultName);
 
+    // ── CONCEDER PODER EXIGE TER PODER ────────────────────────────────────
+    //
+    // `users.manage` cria e edita contas; `roles.manage` é quem CONCEDE poder.
+    // Sem esta trava, quem gerencia usuários criava uma conta admin — ou um
+    // profissional com um papel que gerencia permissões — e escalava sozinho
+    // para o poder total, que é a porta para apagar tudo. Admin passa porque já
+    // carrega `roles.manage`.
+    const podeConcederPoder = app.helpers.ReqProtected.has(admin, "roles.manage");
+    const criaAdmin = req.body.admin === true;
+    const papelConcedePoder = role ? await app.api.role.grants(role._id, "roles.manage") : false;
+    if ((criaAdmin || papelConcedePoder) && !podeConcederPoder) {
+      res.status(403).send({ msg: req.t("errors.needRolesManageToGrant"), permission: "roles.manage" });
+      return;
+    }
+
     // Conferida ANTES de inserir — recusar depois deixaria a conta criada com um
     // 400 dizendo que nada foi salvo. O tipo é "trainer": é o que esta rota cria.
     if (req.body.category && !(await app.api.userCategory.valida(req.body.category, "trainer"))) {
@@ -187,6 +202,23 @@ module.exports = function (app) {
       return;
     }
 
+    // ── CONCEDER PODER EXIGE TER PODER (ver POST) ─────────────────────────
+    //
+    // Três gestos de escalada, todos barrados para quem não gerencia
+    // permissões: virar a conta admin, dar-lhe um papel que gerencia
+    // permissões, ou MEXER numa conta que já é privilegiada — trocar a senha de
+    // um admin é tomá-lo. Admin passa, já carrega `roles.manage`.
+    const podeConcederPoder = app.helpers.ReqProtected.has(admin, "roles.manage");
+    const alvoEhPrivilegiado =
+      target.admin === true || (await app.api.user.hasPermission(target, "roles.manage"));
+    const viraAdmin = body.admin === true;
+    const papelConcedePoder =
+      body.role !== undefined ? await app.api.role.grants(body.role, "roles.manage") : false;
+    if ((alvoEhPrivilegiado || viraAdmin || papelConcedePoder) && !podeConcederPoder) {
+      res.status(403).send({ msg: req.t("errors.needRolesManageToGrant"), permission: "roles.manage" });
+      return;
+    }
+
     // The one door that must never close: somebody active has to keep the
     // power to hand permissions out. Changing the type, dropping the master
     // switch or deactivating can each take the last one away, so the check
@@ -269,6 +301,17 @@ module.exports = function (app) {
     const target = await app.api.user.data(req.params.id);
     if (!target) {
       res.status(404).send({ msg: req.t("errors.userNotFound") });
+      return;
+    }
+
+    // Apagar uma conta privilegiada é um gesto de poder: só quem gerencia
+    // permissões pode. Sem isto, quem só gerencia usuários apagava um admin
+    // (desde que não fosse o último) — ver a mesma trava em POST/PUT.
+    if (
+      (target.admin === true || (await app.api.user.hasPermission(target, "roles.manage"))) &&
+      !app.helpers.ReqProtected.has(admin, "roles.manage")
+    ) {
+      res.status(403).send({ msg: req.t("errors.needRolesManageToGrant"), permission: "roles.manage" });
       return;
     }
 

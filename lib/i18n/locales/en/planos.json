@@ -2,16 +2,24 @@
   "errors": {
     "alreadyOnPlan": "You are already on that plan.",
     "brandImagesNotInPlan": "Your plan does not include brand images. You can still point to an image hosted somewhere else.",
+    "invalidCpf": "That CPF does not look valid. Check the numbers.",
     "membershipBenefitInUse": "This benefit is ticked on {{count}} plan(s). Deactivate it instead of deleting.",
     "membershipBenefitNotFound": "Benefit not found.",
-    "membershipInUse": "This plan is used by {{count}} recurrence(s). Deactivate it instead of deleting.",
+    "membershipInUse": "This plan is in {{count}} subscription(s). Deactivate it instead of deleting.",
     "membershipNotFound": "Plan not found.",
     "notInPlan": "Your plan does not include {{o}}. Talk to whoever manages your account.",
+    "planHasOwnLink": "This plan uses its own sign-up link.",
     "planInactive": "That plan is no longer available.",
     "planIsFree": "The free plan needs no payment.",
     "planLimitReached": "Your plan allows up to {{max}} in {{o}}. Delete what you no longer use, or upgrade.",
     "planNotFound": "That plan does not exist.",
-    "planNotSellable": "That plan is not ready to be sold yet. Support has been notified."
+    "planNotSellable": "That plan is not ready to be sold yet. Support has been notified.",
+    "planSignupDuplicate": "A profile with these details already exists. Contact the gym to continue.",
+    "planSignupEmail": "Enter your e-mail to continue.",
+    "planSignupName": "Tell us your name to continue.",
+    "planSignupNoOwner": "We could not finish now. Contact the gym.",
+    "planSignupRateLimited": "Too many attempts. Try again in a little while.",
+    "planSignupStaffEmail": "That e-mail already belongs to an account."
   },
   "memberships": {
     "model": {

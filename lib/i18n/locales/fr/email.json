@@ -19,6 +19,14 @@
       "text": "{{name}}, {{person}} a réservé {{service}} pour {{when}}. Contact : {{contact}}. Ouvrez l'agenda : {{url}}",
       "title": "{{name}}, un créneau est entré dans votre agenda"
     },
+    "chargeLink": {
+      "subject": "Votre facture de {{valor}} — {{casa}}",
+      "title": "Bonjour, {{name}} !",
+      "body": "Voici le lien pour payer la facture de <strong>{{valor}}</strong>{{descricao}}.<br><br>Échéance : <strong>{{vencimento}}</strong><br><br>Le bouton ci-dessous vous laisse choisir comment payer.",
+      "button": "Payer maintenant",
+      "footer": "Déjà payé ? Ignorez cet e-mail — le solde arrive tout seul.",
+      "text": "{{name}}, voici le lien pour payer {{valor}}, échéance {{vencimento}} : {{url}}"
+    },
     "deletion": {
       "body": "Quelqu'un a demandé, depuis votre compte, de le supprimer. <strong>Rien n'a été supprimé.</strong> Nous allons vous contacter pour comprendre ce qui s'est passé et convenir des prochaines étapes — si vous voulez vraiment partir, nous nous en occupons avec vous.<br><br><strong>Si ce n'était pas vous</strong>, annulez la demande à l'adresse ci-dessous et changez votre mot de passe.",
       "button": "Voir ou annuler la demande",
@@ -43,6 +51,30 @@
       "text": "{{name}}, {{trainerName}} vous a ouvert l’accès à VAFIT.\n\nConnectez-vous sur {{url}} avec l’e-mail {{email}} et le mot de passe convenu avec {{trainerName}}.\n\nVous ne connaissez pas le mot de passe ? Utilisez « J’ai oublié mon mot de passe » sur l’écran de connexion.",
       "title": "{{name}}, votre accès est ouvert"
     },
+    "planUnit": {
+      "subject": "Nouvelle inscription via la vitrine : {{plano}}",
+      "title": "{{person}} a souscrit {{plano}}",
+      "body": "Une inscription est arrivée par la vitrine, au site <strong>{{unidade}}</strong>.<br><br>Nom : <strong>{{person}}</strong><br>CPF : {{cpf}}<br>WhatsApp : {{whatsapp}}<br>E-mail : {{contact}}<br>Offre : <strong>{{plano}}</strong> — {{valor}}",
+      "button": "Ouvrir la fiche",
+      "footer": "L'abonnement est déjà dans les finances de cette personne. La facture apparaît quand vous ouvrez Finances.",
+      "text": "{{person}} a souscrit {{plano}} ({{unidade}}). CPF {{cpf}}, WhatsApp {{whatsapp}}, e-mail {{contact}}. Montant {{valor}}. Ouvrir : {{url}}"
+    },
+    "planWelcome": {
+      "subject": "Votre inscription à {{plano}} est créée",
+      "title": "Merci, {{name}} !",
+      "body": "Votre inscription à <strong>{{plano}}</strong> a été créée au site <strong>{{unidade}}</strong>.<br><br>Montant : <strong>{{valor}}</strong><br><br>La salle vous contactera pour le paiement et la suite.",
+      "button": "Contacter la salle",
+      "footer": "Si ce n'était pas vous, répondez à cet e-mail et nous annulons.",
+      "text": "{{name}}, votre inscription à {{plano}} ({{unidade}}) est créée. Montant : {{valor}}. La salle vous contactera pour le paiement."
+    },
+    "planWelcomePay": {
+      "body": "Votre inscription au <strong>{{plano}}</strong> a été créée à <strong>{{unidade}}</strong>.<br><br>Montant : <strong>{{valor}}</strong><br>Échéance : <strong>{{vencimento}}</strong><br><br>Il ne reste que le paiement. Le bouton ci-dessous vous laisse choisir comment payer.",
+      "button": "Payer maintenant",
+      "footer": "Si ce n'était pas vous, répondez à cet e-mail et nous annulons.",
+      "subject": "Votre inscription au {{plano}} est créée — paiement en attente",
+      "text": "{{name}}, votre inscription au {{plano}} ({{unidade}}) a été créée. Montant : {{valor}}, échéance {{vencimento}}. Payez sur : {{url}}",
+      "title": "Merci, {{name}} !"
+    },
     "request": {
       "body": "<strong>{{professionalName}}</strong> ({{professionalEmail}}) souhaite vous suivre sur VAFIT.<br><br>Si vous acceptez, cette personne verra votre historique et construira des plans avec les autres professionnels qui prennent déjà soin de vous. Vous pouvez retirer cet accès quand vous voulez.<br><br>Le lien est valable <strong>{{days}} jours</strong>.",
       "button": "Voir et répondre à la demande",
@@ -64,6 +96,31 @@
     },
     "timeSheet": {
       "subject": "Votre feuille de présence"
+    },
+    "appointmentDefaultWhat": "Rendez-vous",
+    "appointmentPerson": {
+      "subject": "Rendez-vous confirmé — {{when}}",
+      "title": "{{name}}, votre rendez-vous est confirmé",
+      "body": "C'est réservé : <strong>{{what}}</strong> avec <strong>{{professional}}</strong>.<br><br>Quand : <strong>{{when}}</strong><br>Durée : {{duration}}<br>Où : {{place}}",
+      "button": "Ouvrir l'app",
+      "footer": "Le fichier joint ajoute ce rendez-vous au calendrier de votre téléphone. Si vous ne pouvez pas venir, prévenez {{professional}} à l'avance.",
+      "text": "{{name}}, c'est réservé : {{what}} avec {{professional}}, {{when}} ({{duration}}), à {{place}}. Ouvrir l'app : {{url}}"
+    },
+    "appointmentPersonNoApp": {
+      "subject": "Rendez-vous confirmé — {{when}}",
+      "title": "{{name}}, votre rendez-vous est confirmé",
+      "body": "C'est réservé : <strong>{{what}}</strong> avec <strong>{{professional}}</strong>.<br><br>Quand : <strong>{{when}}</strong><br>Durée : {{duration}}<br>Où : {{place}}",
+      "button": "Ouvrir l'app",
+      "footer": "Le fichier joint ajoute ce rendez-vous au calendrier de votre téléphone. Si vous ne pouvez pas venir, prévenez {{professional}} à l'avance.",
+      "text": "{{name}}, c'est réservé : {{what}} avec {{professional}}, {{when}} ({{duration}}), à {{place}}."
+    },
+    "appointmentProfessional": {
+      "subject": "Réservé : {{person}} — {{when}}",
+      "title": "{{name}}, un rendez-vous est entré dans votre agenda",
+      "body": "<strong>{{what}}</strong> avec <strong>{{person}}</strong>.<br><br>Quand : <strong>{{when}}</strong><br>Durée : {{duration}}<br>Contact : {{contact}}",
+      "button": "Ouvrir l'agenda",
+      "footer": "Le fichier joint ajoute le rendez-vous à votre calendrier. Pour reprogrammer ou annuler, passez par l'agenda.",
+      "text": "{{name}}, nouveau dans votre agenda : {{what}} avec {{person}}, {{when}} ({{duration}}). Contact : {{contact}}. Ouvrir l'agenda : {{url}}"
     }
   }
 }

@@ -9,6 +9,10 @@
         "title": {
           "hint": "E.g.: Training, Consultation",
           "label": "Appointment type"
+        },
+        "minutes": {
+          "label": "Appointment length (min)",
+          "hint": "E.g. 50"
         }
       },
       "assessment": {

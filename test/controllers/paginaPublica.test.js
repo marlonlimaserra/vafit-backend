@@ -46,9 +46,20 @@ function gradeAbertaEm(quando) {
 // `semGrade` é quem nunca abriu a configuração de agenda: não há documento de
 // disponibilidade nenhum para essa conta. Com a grade por profissional fora da
 // tela, esse passou a ser o caso NORMAL de uma casa nova.
-function monta({ paginas = [], grades = null, servicos = null, semana = {}, semGrade = false, ocupados = [] } = {}) {
-  const permissao = permiteTudo(USUARIO);
+function monta({
+  paginas = [],
+  grades = null,
+  servicos = null,
+  semana = {},
+  semGrade = false,
+  ocupados = [],
+  logado = USUARIO,
+  acompanhadoPor = 0,
+} = {}) {
+  const permissao = permiteTudo(logado);
   const marcados = [];
+  const porEmail = [];
+  const vinculos = [];
 
   const app = fakeApp({
     helpers: permissao.helpers,
@@ -117,7 +128,8 @@ function monta({ paginas = [], grades = null, servicos = null, semana = {}, semG
             [String(PRO_B)]: { name: "Bruno", avatarAt: null, bio: "" },
           };
         },
-        async dataByEmail() {
+        async dataByEmail(email) {
+          porEmail.push(email);
           return undefined;
         },
         async insertStudent() {
@@ -125,8 +137,12 @@ function monta({ paginas = [], grades = null, servicos = null, semana = {}, semG
         },
       },
       link: {
-        async link() {
+        async link(profissional, pessoa) {
+          vinculos.push({ profissional: String(profissional), pessoa: String(pessoa) });
           return true;
+        },
+        async countProfessionalsOf() {
+          return acompanhadoPor;
         },
       },
       service: {
@@ -169,7 +185,7 @@ function monta({ paginas = [], grades = null, servicos = null, semana = {}, semG
   });
 
   BookingController(app);
-  return { app, marcados };
+  return { app, marcados, porEmail, vinculos };
 }
 
 const PAGINA_AVALIACAO = {
@@ -771,4 +787,95 @@ test("marcar sábado de manhã VALE, mesmo com o servidor em UTC", async () => {
     if (tzDeAntes === undefined) delete process.env.TZ;
     else process.env.TZ = tzDeAntes;
   }
+});
+
+// ── O APP DE QUEM JÁ É CLIENTE (16/11/2026) ──────────────────────────────
+//
+// *"em marcar horário… fica 'o que você quer marcar' e não aparece mais
+// nada"*: o app pedia a agenda SEM página, que só lista quem tem a grade
+// antiga ligada — e ninguém mais a tem. As rotas /my/booking listam as
+// páginas e marcam com a pessoa da SESSÃO.
+const ALUNO = { _id: new ObjectId(), name: "Rafael", type: "student", email: "", phone: "31999990000" };
+
+test("o app lista as páginas ATIVAS que têm o que marcar — e as fotos de quem atende", async () => {
+  const pausada = { ...PAGINA_AVALIACAO, _id: new ObjectId(), slug: "pausada", active: 0 };
+  const { app } = monta({ paginas: [PAGINA_AVALIACAO, pausada], logado: ALUNO });
+
+  const r = await call(app, "get", "/my/booking");
+
+  assert.equal(r.status, 200);
+  assert.deepEqual(
+    r.body.pages.map((p) => p.slug),
+    ["avaliacao"]
+  );
+  assert.equal(r.body.default, false);
+  // A foto de quem a página oferece (a Ana), pelo id.
+  assert.ok(r.body.photos[String(PRO_A)]);
+});
+
+test("sem página nenhuma, a agenda de sempre — se alguém atende por ela", async () => {
+  const { app } = monta({ paginas: [], logado: ALUNO });
+  const r = await call(app, "get", "/my/booking");
+  assert.deepEqual(r.body.pages, []);
+  assert.equal(r.body.default, true);
+});
+
+test("sem página e sem grade ligada, nada a oferecer — e o app diz isso, em vez da tela vazia", async () => {
+  const { app } = monta({ paginas: [], grades: [], logado: ALUNO });
+  const r = await call(app, "get", "/my/booking");
+  assert.deepEqual(r.body.pages, []);
+  assert.equal(r.body.default, false);
+});
+
+test("profissional que ninguém acompanha não entra na rota do cliente", async () => {
+  const { app } = monta({ paginas: [PAGINA_AVALIACAO], logado: { ...USUARIO, type: "trainer" } });
+  const r = await call(app, "get", "/my/booking");
+  assert.equal(r.status, 403);
+});
+
+test("marcar pelo app usa a pessoa da SESSÃO — sem e-mail, sem ficha nova", async () => {
+  // O ALUNO não tem e-mail (entrou pelo telefone). Pela página aberta ele
+  // viraria uma ficha nova a cada marcação.
+  const quando = daquiUmaSemana();
+  const { app, marcados, porEmail, vinculos } = monta({
+    paginas: [PAGINA_AVALIACAO],
+    semana: gradeAbertaEm(quando),
+    logado: ALUNO,
+  });
+  rateLimit.reset();
+
+  const r = await call(app, "post", "/my/booking", {
+    body: {
+      slug: "avaliacao",
+      professional: String(PRO_A),
+      service: String(SERVICO_A),
+      date: quando.toISOString(),
+      // Tentativa de se passar por outro: o corpo não escolhe a pessoa.
+      name: "Outra Pessoa",
+      email: "outra@x.com",
+    },
+  });
+
+  assert.equal(r.status, 201);
+  assert.equal(marcados.length, 1);
+  assert.equal(String(marcados[0].aluno), String(ALUNO._id));
+  assert.deepEqual(porEmail, []);
+  assert.deepEqual(vinculos, [{ profissional: String(PRO_A), pessoa: String(ALUNO._id) }]);
+});
+
+test("pelo app, o recorte da página vale igual — serviço de fora é recusado", async () => {
+  const quando = daquiUmaSemana();
+  const { app, marcados } = monta({
+    paginas: [PAGINA_AVALIACAO],
+    semana: gradeAbertaEm(quando),
+    logado: ALUNO,
+  });
+  rateLimit.reset();
+
+  const r = await call(app, "post", "/my/booking", {
+    body: { slug: "avaliacao", professional: String(PRO_A), service: String(SERVICO_B), date: quando.toISOString() },
+  });
+
+  assert.equal(r.status, 400);
+  assert.equal(marcados.length, 0);
 });

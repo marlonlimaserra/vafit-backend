@@ -20,7 +20,7 @@ const path = require("node:path");
 // resposta. Quatro chaves estavam faltando — três minhas, do aulão, e
 // `errors.invalidFile`, do suporte.
 //
-// O `gofitnow-frontend` já tinha este teste (`chavesUsadas.test.js`), e ele me
+// O `vafit-frontend` já tinha este teste (`chavesUsadas.test.js`), e ele me
 // pegou no mesmo dia usando `common.home`. Este é o par dele aqui.
 //
 // ── O QUE FICA DE FORA, e por quê ─────────────────────────────────────────

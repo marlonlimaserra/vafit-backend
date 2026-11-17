@@ -1,7 +1,9 @@
 {
   "errors": {
     "apiKeyCannotManage": "Una clave de API no puede crear ni revocar claves. Entra en la app para eso.",
+    "apiKeyLevelTooLow": "Esta clave es de nivel \"{{nivel}}\" y no puede realizar esta acción.",
     "apiKeyNotFound": "Clave no encontrada.",
+    "apiKeyRevoked": "Esta clave fue revocada.",
     "invalidApiKey": "Clave de API inválida o revocada.",
     "noApiKey": "Clave de API no informada."
   }

@@ -153,6 +153,17 @@ function montar({
       if (achado) Object.assign(achado, mudanca.$set);
       else gravados.push({ ...filtro, ...mudanca.$set });
     },
+    // `revogarAcesso` derruba TODOS os vínculos da pessoa de uma vez: ela
+    // está sendo apagada, e não desligada de um aparelho.
+    deleteMany: async (filtro) => {
+      for (let i = gravados.length - 1; i >= 0; i -= 1) {
+        if (!filtro.person || String(gravados[i].person) === String(filtro.person)) {
+          gravados.splice(i, 1);
+        }
+      }
+    },
+    countDocuments: async (filtro = {}) =>
+      gravados.filter((v) => !filtro.person || String(v.person) === String(filtro.person)).length,
   });
 
   // O `cadastro` vai junto: é dele que `situacaoNaPorta` tira a data da
@@ -326,6 +337,53 @@ test("bloquear derruba a regra e NÃO apaga o rosto", async () => {
   assert.equal(r[0].usuario, 9);
   // Nada de `destroy_objects` em `users`: o rosto fica.
   assert.ok(!comandos.some((c) => c.body?.object === "users"));
+});
+
+// ── BLOQUEAR E APAGAR NÃO SÃO A MESMA COISA ────────────────────────────
+//
+// *"eu deletei o meu aluno, e mesmo assim a catraca continua liberando"*
+// (14/10/2026).
+//
+// Bloquear é uma chave que se desvira amanhã: tira a regra e deixa o rosto,
+// para quem voltar a pagar na quinta entrar na quinta. Apagar é definitivo —
+// a pessoa saiu, e a biometria dela não fica num aparelho na parede.
+test("revogar apaga a REGRA e o ROSTO, nessa ordem", async () => {
+  const { modelo, comandos } = montar({
+    vinculos: [{ dispositivo: APARELHO, person: PESSOA, usuarioNoAparelho: "9" }],
+  });
+
+  await modelo.revogarAcesso(PESSOA);
+
+  assert.equal(comandos.length, 2);
+  // A REGRA primeiro: se o aparelho só aplicar um dos dois, que seja o que
+  // fecha a porta. Na ordem inversa, a janela entre eles é uma janela em que
+  // a catraca ainda gira.
+  assert.equal(comandos[0].body.object, "user_access_rules");
+  assert.equal(comandos[1].body.object, "users");
+  assert.deepEqual(comandos[1].body.where, { users: { id: 9 } });
+});
+
+test("e o VÍNCULO sai só depois de os comandos estarem na fila", async () => {
+  // É do vínculo que sai o número da pessoa lá dentro. Apagá-lo antes
+  // deixaria o comando sem destino: a pessoa sumiria do sistema e continuaria
+  // entrando — que é exatamente o defeito original.
+  const { modelo, comandos, gravados } = montar({
+    vinculos: [{ dispositivo: APARELHO, person: PESSOA, usuarioNoAparelho: "9" }],
+  });
+
+  await modelo.revogarAcesso(PESSOA);
+
+  assert.equal(comandos.length, 2);
+  assert.deepEqual(gravados, []);
+});
+
+test("revogar quem nunca passou por aparelho nenhum não manda comando", async () => {
+  const { modelo, comandos } = montar();
+
+  const r = await modelo.revogarAcesso(PESSOA);
+
+  assert.equal(comandos.length, 0);
+  assert.deepEqual(r, []);
 });
 
 test("bloquear quem nunca esteve no aparelho não manda comando nenhum", async () => {
@@ -677,4 +735,115 @@ test("sem nenhum leitor com a trava, reavaliar não faz nada", async () => {
 
   assert.deepEqual(await modelo.reavaliarPassagem(PESSOA), []);
   assert.equal(comandos.length, 0);
+});
+
+// ── AS DUAS RECUSAS QUE O SQLITE DO APARELHO ESCREVE (19/10/2026) ─────────
+//
+// Elas apareceram na aba "Erros" do leitor, as duas do MESMO comando —
+// `create_objects` em `user_access_rules` —, e querem dizer coisas opostas:
+//
+//   UNIQUE      o par (usuário, regra) já existe: o destino está cumprido
+//   FOREIGN KEY o usuário ou a regra não existem mais lá dentro
+//
+// Guardar as duas na mesma lista de "alguma coisa não foi aplicada no leitor"
+// é o que ensina a ignorar a lista inteira.
+const LIGAR = {
+  endpoint: "create_objects",
+  body: { object: "user_access_rules", values: [{ user_id: 4, access_rule_id: 2 }] },
+};
+const JA_EXISTIA = {
+  error: "constraint failed: UNIQUE constraint failed: user_access_rules.user_id, user_access_rules.access_rule_id",
+  code: 1,
+};
+const NAO_EXISTE = { error: "constraint failed: FOREIGN KEY constraint failed", code: 1 };
+
+test("'já existe' NÃO é um erro a tratar — é o destino cumprido", () => {
+  assert.equal(Dispositivo.recusaInofensiva(LIGAR, Dispositivo.lerFalha(JA_EXISTIA)), true);
+});
+
+test("e por isso a fila mostra esse comando como respondido, não recusado", () => {
+  // Vermelho num vínculo que está de pé manda procurar defeito onde não há.
+  assert.equal(
+    Dispositivo.estadoDoComando({ ...LIGAR, enviadoEm: new Date(), resultado: JA_EXISTIA }),
+    "respondido"
+  );
+});
+
+test("'não existe' continua sendo erro, e é outro problema", () => {
+  assert.equal(Dispositivo.recusaInofensiva(LIGAR, Dispositivo.lerFalha(NAO_EXISTE)), false);
+  assert.equal(Dispositivo.apontaParaOVazio(LIGAR, Dispositivo.lerFalha(NAO_EXISTE)), true);
+  assert.equal(
+    Dispositivo.estadoDoComando({ ...LIGAR, enviadoEm: new Date(), resultado: NAO_EXISTE }),
+    "recusado"
+  );
+});
+
+test("a mesma mensagem em OUTRO comando não é perdoada", () => {
+  // O perdão vale para o vínculo com a regra, onde "já existe" é o destino.
+  // Num `users` repetido ele esconderia um cadastro duplicado.
+  const outro = { endpoint: "create_objects", body: { object: "users" } };
+
+  assert.equal(Dispositivo.recusaInofensiva(outro, Dispositivo.lerFalha(JA_EXISTIA)), false);
+  assert.equal(Dispositivo.apontaParaOVazio(outro, Dispositivo.lerFalha(NAO_EXISTE)), false);
+});
+
+test("o que deu certo não é nem uma coisa nem outra", () => {
+  assert.equal(Dispositivo.recusaInofensiva(LIGAR, Dispositivo.lerFalha({ changes: 1 })), false);
+  assert.equal(Dispositivo.apontaParaOVazio(LIGAR, Dispositivo.lerFalha({ changes: 1 })), false);
+});
+
+// ── E O QUE O SERVIDOR FAZ COM CADA UMA ──────────────────────────────────
+//
+// A de unicidade some do registro; a de chave estrangeira fica E dispara a
+// releitura que conserta a nossa cópia sozinha.
+function comRespostaDoAparelho(comando) {
+  const erros = [];
+  const enfileirados = [];
+
+  const modelo = new Dispositivo({ api: {} });
+
+  modelo.colecaoDeComandos = async () => ({
+    insertOne: async (d) => enfileirados.push(d),
+    findOneAndUpdate: async () => comando,
+  });
+  modelo.colecaoDeErros = async () => ({ insertOne: async (d) => erros.push(d) });
+  // O que este caso olha é a DECISÃO, não a gravação do cadastro lido.
+  modelo.guardarCadastro = async () => {};
+
+  return { modelo, erros, enfileirados };
+}
+
+test("a recusa 'já existe' não vira registro de erro", async () => {
+  const { modelo, erros } = comRespostaDoAparelho(LIGAR);
+
+  await modelo.guardarResultado(APARELHO, JA_EXISTIA);
+
+  assert.deepEqual(erros, [], "nada a tratar: o vínculo está de pé");
+});
+
+test("a de chave estrangeira vira registro E pede a lista de novo", async () => {
+  // Sem a releitura, toda tentativa de liberar essa pessoa repete a mesma
+  // recusa: a nossa cópia continua jurando que o usuário existe.
+  const { modelo, erros, enfileirados } = comRespostaDoAparelho(LIGAR);
+
+  await modelo.guardarResultado(APARELHO, NAO_EXISTE);
+
+  assert.equal(erros.length, 1);
+  assert.match(erros[0].mensagem, /FOREIGN KEY/);
+
+  assert.deepEqual(
+    enfileirados.map((c) => c.body.object),
+    ["users", "access_rules", "portal_access_rules"],
+    "só os três para onde a chave aponta — não os sete de 'Perguntar ao aparelho'"
+  );
+  assert.ok(enfileirados.every((c) => c.endpoint === "load_objects"));
+});
+
+test("uma resposta boa não pergunta nada de novo", async () => {
+  const { modelo, erros, enfileirados } = comRespostaDoAparelho(LIGAR);
+
+  await modelo.guardarResultado(APARELHO, { changes: 1 });
+
+  assert.deepEqual(erros, []);
+  assert.deepEqual(enfileirados, []);
 });

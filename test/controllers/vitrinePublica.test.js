@@ -63,6 +63,16 @@ function monta({ planos = PLANOS, beneficios = BENEFICIOS } = {}) {
           return [];
         },
       },
+      // O catálogo de formas da casa: a vitrine resolve as chaves do plano
+      // em nomes, porque o nome é da casa ("Pix (chave CNPJ)").
+      paymentMethod: {
+        // `paraTela` e não `listActive`: o catálogo sai daqui com o nome já
+        // resolvido no idioma do pedido — as sete formas originais guardam
+        // `name` vazio e o nome delas é a tradução. Ver `PaymentMethod_model`.
+        async paraTela() {
+          return [{ key: "pix", name: "Pix" }];
+        },
+      },
       tenant: {
         async currencyOfInstance() {
           return { currency: "BRL" };
@@ -167,6 +177,8 @@ function comUnidades({ planos, unidades = UNIDADES } = {}) {
       membership: { async listActive() { return planos; } },
       membershipBenefit: { async listActive() { return BENEFICIOS; } },
       unit: { async listActive() { return unidades; } },
+      // O catálogo da casa: a vitrine resolve as chaves do plano em nomes.
+      paymentMethod: { async paraTela() { return [{ key: "pix", name: "Pix" }, { key: "credit", name: "Cartão" }]; } },
       tenant: { async currencyOfInstance() { return { currency: "BRL" }; } },
     },
     helpers: { ReqProtected: { async can() { return { _id: "u1" }; } } },
@@ -210,34 +222,169 @@ test("plano SEM unidade vale em todas — é o que mantém o cadastro antigo no 
   assert.equal((await pedirUnidade(app, "un2")).body.planos.length, 1);
 });
 
-test("a vitrine devolve as unidades para o seletor", async () => {
+// ── O CARTÃO DA UNIDADE ─────────────────────────────────────────────────
+//
+// Até 14/10/2026 daqui saíam só `id` e `name`, e havia um teste chamado "nada
+// de telefone nem endereço" guardando isso. Ele o desfez: *"mostre o card de
+// cada unidade com a foto em cima, endereço, telefone, whatsapp"*.
+//
+// A regra antiga confundia DADO PESSOAL com VITRINE. O endereço e o telefone
+// de uma academia são a placa na porta — ela paga para que apareçam no mapa e
+// no Instagram. Esconder aqui não protegia ninguém; só obrigava quem escolhia
+// entre duas filiais a sair da página para descobrir qual era a mais perto.
+const COMPLETA = {
+  _id: "un1",
+  name: "Centro",
+  active: true,
+  photo: "f1",
+  logradouro: "Rua X",
+  numero: "100",
+  bairro: "Centro",
+  cidade: "Niterói",
+  uf: "RJ",
+  phone: "(21) 99999-0000",
+  whatsapp: "5521999990000",
+  email: "contato@academia.com",
+  lat: -22.9,
+  lng: -43.1,
+};
+
+test("a vitrine devolve as unidades para o cartão", async () => {
   const app = comUnidades({ planos: [PLANO_CENTRO, PLANO_PARATY] });
   const r = await pedirUnidade(app);
 
-  assert.deepEqual(r.body.unidades, [
-    { id: "un1", name: "Centro" },
-    { id: "un2", name: "Paraty" },
-  ]);
+  assert.deepEqual(
+    r.body.unidades.map((u) => [u.id, u.name]),
+    [
+      ["un1", "Centro"],
+      ["un2", "Paraty"],
+    ]
+  );
 });
 
-test("unidade SEM plano nenhum não entra no seletor", async () => {
+test("unidade SEM plano nenhum não entra na escolha", async () => {
   // Uma opção que leva a uma página vazia é pior que opção nenhuma — e quem
   // abre a vitrine é um cliente em potencial, não alguém disposto a
   // investigar.
   const app = comUnidades({ planos: [PLANO_CENTRO] });
   const r = await pedirUnidade(app);
 
-  assert.deepEqual(r.body.unidades, [{ id: "un1", name: "Centro" }]);
+  assert.deepEqual(r.body.unidades.map((u) => u.id), ["un1"]);
 });
 
-test("do seletor saem só id e nome — nada de telefone nem endereço", async () => {
-  // Esta rota responde sem sessão para qualquer um. Ela devolve o que o CARTÃO
-  // desenha, e nada além.
+test("o cartão leva foto, endereço, telefone e whatsapp", async () => {
+  const app = comUnidades({ planos: [PLANO_TODAS], unidades: [COMPLETA] });
+  const u = (await pedirUnidade(app)).body.unidades[0];
+
+  assert.match(u.photoUrl, /\/public\/unit-image\/[^/]+\/f1$/);
+  // Uma linha só, montada por `lib/cep.js` — três telas montando o mesmo
+  // endereço dariam três formatos.
+  assert.equal(u.endereco, "Rua X, 100 — Centro, Niterói/RJ");
+  assert.equal(u.phone, "(21) 99999-0000");
+  assert.equal(u.whatsapp, "5521999990000");
+  assert.equal(u.lat, -22.9);
+});
+
+// ── AS FORMAS DE PAGAMENTO DO PLANO ─────────────────────────────────────
+//
+// *"aqui em plano faltou eu escolher as formas de pagamento"* (14/10/2026).
+//
+// O plano guarda as CHAVES; a vitrine devolve os NOMES. Resolver na tela
+// pediria que ela conhecesse o catálogo da casa — e o nome é da casa: ela
+// pode ter chamado o Pix de "Pix (chave CNPJ)".
+test("o plano devolve as formas que ele aceita, já com o nome da casa", async () => {
   const app = comUnidades({
-    planos: [PLANO_TODAS],
-    unidades: [{ ...UNIDADES[0], phone: "(21) 99999-0000", endereco: "Rua X", email: "a@b.c" }],
+    planos: [{ ...PLANO_TODAS, formasDePagamento: ["pix"] }],
   });
+
   const r = await pedirUnidade(app);
 
-  assert.deepEqual(Object.keys(r.body.unidades[0]).sort(), ["id", "name"]);
+  assert.deepEqual(r.body.planos[0].formasDePagamento, [{ key: "pix", name: "Pix" }]);
+});
+
+test("lista VAZIA quer dizer TODAS — e não nenhuma", async () => {
+  // Nenhum plano cadastrado até hoje tem esta lista. "Nenhuma" esvaziaria a
+  // vitrine inteira no deploy que criou o campo.
+  const app = comUnidades({ planos: [{ ...PLANO_TODAS, formasDePagamento: [] }] });
+
+  const r = await pedirUnidade(app);
+
+  assert.deepEqual(
+    r.body.planos[0].formasDePagamento.map((f) => f.key),
+    ["pix", "credit"]
+  );
+});
+
+test("forma que a casa DESLIGOU some do plano que a marcava", async () => {
+  // O catálogo manda: desligar o boleto tira o boleto de todo plano, sem
+  // precisar editar nenhum deles.
+  const app = comUnidades({
+    planos: [{ ...PLANO_TODAS, formasDePagamento: ["pix", "billet"] }],
+  });
+
+  const r = await pedirUnidade(app);
+
+  assert.deepEqual(
+    r.body.planos[0].formasDePagamento.map((f) => f.key),
+    ["pix"]
+  );
+});
+
+test("a unidade pode ser pedida pelo APELIDO — é o que vira `/vitrine/niteroi`", async () => {
+  const app = comUnidades({
+    planos: [PLANO_CENTRO, PLANO_PARATY],
+    unidades: [
+      { _id: "un1", name: "Centro", active: true, alias: "centro" },
+      { _id: "un2", name: "Paraty", active: true, alias: "paraty" },
+    ],
+  });
+
+  const r = await pedirUnidade(app, "paraty");
+
+  assert.deepEqual(r.body.planos.map((p) => p.name), ["Paraty 70"]);
+});
+
+test("e pelo ID também — é o que está nos iframes já pendurados", async () => {
+  // Trocar o endereço não pode apagar o link que alguém mandou por WhatsApp
+  // semana passada. Os dois caminhos custam uma comparação.
+  const app = comUnidades({
+    planos: [PLANO_CENTRO, PLANO_PARATY],
+    unidades: [
+      { _id: "un1", name: "Centro", active: true, alias: "centro" },
+      { _id: "un2", name: "Paraty", active: true, alias: "paraty" },
+    ],
+  });
+
+  const r = await pedirUnidade(app, "un2");
+
+  assert.deepEqual(r.body.planos.map((p) => p.name), ["Paraty 70"]);
+});
+
+test("o apelido sai no cartão, para a tela montar o link", async () => {
+  const app = comUnidades({
+    planos: [PLANO_TODAS],
+    unidades: [{ ...COMPLETA, alias: "centro" }],
+  });
+
+  assert.equal((await pedirUnidade(app)).body.unidades[0].alias, "centro");
+});
+
+test("o E-MAIL continua fora — numa página pública ele é isca de robô", () => {
+  // Quem quer falar usa o WhatsApp, que está logo ali no cartão.
+  const app = comUnidades({ planos: [PLANO_TODAS], unidades: [COMPLETA] });
+
+  return pedirUnidade(app).then((r) => {
+    assert.equal(r.body.unidades[0].email, undefined);
+  });
+});
+
+test("unidade sem foto nem endereço não inventa nada", async () => {
+  // O cadastro mínimo é só o nome, e o cartão tem de aguentar isso sem
+  // mostrar "undefined" nem um quadro de foto quebrado.
+  const app = comUnidades({ planos: [PLANO_TODAS], unidades: [UNIDADES[0]] });
+  const u = (await pedirUnidade(app)).body.unidades[0];
+
+  assert.equal(u.photoUrl, null);
+  assert.equal(u.endereco, "");
+  assert.equal(u.phone, "");
 });

@@ -119,6 +119,9 @@
     },
     "usernameInUse": "Este nombre de usuario ya está en uso.",
     "vocabularyLength": "Usa entre 3 y 20 letras para el {{field}} (ej.: alumno / alumnos).",
-    "wrongCurrentPassword": "Contraseña actual incorrecta."
+    "wrongCurrentPassword": "Contraseña actual incorrecta.",
+    "invalidMinutes": "Indica los minutos en número, de {{min}} a {{max}}.",
+    "accessBlocked": "Tu acceso fue bloqueado. Para liberarlo, habla con quien te atiende.",
+    "accountInactive": "Tu cuenta está desactivada. Para reactivarla, habla con quien te atiende."
   }
 }

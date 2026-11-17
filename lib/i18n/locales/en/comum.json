@@ -119,6 +119,9 @@
     },
     "usernameInUse": "This username is already taken.",
     "vocabularyLength": "Use between 3 and 20 letters for the {{field}} (e.g. student / students).",
-    "wrongCurrentPassword": "Current password is wrong."
+    "wrongCurrentPassword": "Current password is wrong.",
+    "invalidMinutes": "Enter the minutes as a number, from {{min}} to {{max}}.",
+    "accessBlocked": "Your access has been blocked. To unlock it, talk to your provider.",
+    "accountInactive": "Your account is deactivated. To reactivate it, talk to your provider."
   }
 }

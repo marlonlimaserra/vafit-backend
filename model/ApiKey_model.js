@@ -1,4 +1,5 @@
 const { ObjectId } = require("mongodb");
+const mcpTools = require("../lib/mcpTools.js");
 
 // A collection `api_keys` — chaves para a pessoa chamar a API fora do app.
 //
@@ -58,7 +59,7 @@ ApiKey_model.prototype.countActive = async function (userId) {
 
 // Devolve { doc, key } — `key` é o texto completo e é a ÚNICA vez que ele
 // existe fora da mão de quem pediu.
-ApiKey_model.prototype.create = async function (userId, name) {
+ApiKey_model.prototype.create = async function (userId, name, ferramentas, nivel) {
   const col = await this.collection();
   const { prefix, key } = this.generate();
 
@@ -67,6 +68,19 @@ ApiKey_model.prototype.create = async function (userId, name) {
     name: String(name || "").trim(),
     prefix,
     hash: this.hash(key),
+    // AS FERRAMENTAS QUE ESTA CHAVE ALCANÇA no MCP. Vazio é TODAS — ver
+    // `ferramentasDa`, logo abaixo.
+    ferramentas: mcpTools.ferramentasValidas(ferramentas),
+    // E O QUÃO FUNDO ela mexe: ler, escrever ou apagar. Eixo diferente da
+    // lista acima — ver `nivelDe` em `lib/mcpTools.js`.
+    //
+    // Chave NOVA sem nível dito nasce "escrever", não "apagar": criar e editar é
+    // o que quase toda integração quer, e apagar exige marcar de propósito. O
+    // padrão fail-open ("apagar") de `nivelValido` existe só para a chave LEGADA
+    // que já roda sem o campo — não para uma que nasce agora por API crua.
+    nivel: mcpTools.NIVEIS.includes(String(nivel || "").trim())
+      ? String(nivel).trim()
+      : "escrever",
     createdAt: new Date(),
     lastUsedAt: null,
     revokedAt: null,
@@ -111,6 +125,68 @@ ApiKey_model.prototype.revoke = async function (userId, id) {
     { $set: { revokedAt: new Date() } }
   );
   return res.modifiedCount > 0;
+};
+
+// ── AS FERRAMENTAS DA CHAVE (08/11/2026) ────────────────────────────────
+//
+// *"no SprintHub a gente escolhe quais ferramentas vão estar disponíveis"*.
+//
+// A permissão responde *esta PESSOA pode?*. Isto responde outra pergunta, que
+// não tinha onde morar: *esta CONEXÃO deveria?*
+//
+// São diferentes porque a mesma pessoa entra por portas diferentes. O dono da
+// academia, com todas as permissões, quer o assistente de dentro do produto
+// com as 83 ferramentas, o Claude Desktop dele com vinte, e a automação de
+// cobrança com três. Papel não expressa isso: papel é da PESSOA, e ela é a
+// mesma nas três. Resolver com um papel por integração seria multiplicar
+// papéis até ninguém mais saber o que cada um faz.
+//
+// ── ELA SÓ ESTREITA, NUNCA ALARGA ──────────────────────────────────────
+//
+// Uma chave que peça `pessoa_excluir` para quem não tem `people.delete`
+// continua sem alcançá-la. Se a lista concedesse, esta collection viraria um
+// segundo lugar de dar poder — e dois lugares de conceder é exatamente onde o
+// furo aparece, porque um deles envelhece sem ninguém notar.
+//
+// ── VAZIO É TODAS ──────────────────────────────────────────────────────
+//
+// A mesma convenção de `users.units` na ficha. Lista vazia significando
+// "nenhuma" deixaria toda chave criada antes deste deploy sem alcançar nada,
+// no mesmo instante, e sem ninguém entender por quê — uma migração silenciosa
+// disfarçada de campo novo.
+ApiKey_model.prototype.setFerramentas = async function (userId, id, ferramentas, nivel) {
+  if (!ObjectId.isValid(id)) return false;
+  const col = await this.collection();
+  const res = await col.updateOne(
+    { _id: new ObjectId(id), user: new ObjectId(userId), revokedAt: null },
+    {
+      $set: {
+        ferramentas: mcpTools.ferramentasValidas(ferramentas),
+        nivel: mcpTools.nivelValido(nivel),
+        updatedAt: new Date(),
+      },
+    }
+  );
+  return res.matchedCount > 0;
+};
+
+// O que o MCP lê. Documento sem o campo (toda chave anterior ao deploy) é
+// vazio, que é TODAS.
+ApiKey_model.prototype.ferramentasDa = function (doc) {
+  return Array.isArray(doc?.ferramentas) ? doc.ferramentas : [];
+};
+
+// ── O NÍVEL DE UMA CHAVE QUE AINDA NÃO TEM O CAMPO ──────────────────────
+//
+// É "apagar", que é tudo. Não porque seja o melhor padrão — não é —, mas
+// porque estreitar em silêncio uma credencial que já está numa integração
+// rodando derruba o sistema de alguém num deploy que ninguém ligaria à causa.
+//
+// O padrão seguro vale para quem NASCE daqui em diante: a tela de criar
+// conexão começa em "escrever", e subir para "apagar" é uma marcação de
+// propósito. Ver `NovaConexaoMcp.jsx`.
+ApiKey_model.prototype.nivelDe = function (doc) {
+  return mcpTools.nivelValido(doc?.nivel);
 };
 
 // A verificação de cada requisição. Devolve o documento, ou undefined.

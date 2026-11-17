@@ -754,7 +754,7 @@ test("o aperto de mão diz quem somos e o que temos", async () => {
 
   const r = await rpc(app, "initialize", {});
 
-  assert.equal(r.body.result.serverInfo.name, "gofitnow");
+  assert.equal(r.body.result.serverInfo.name, "vafit");
   assert.ok(r.body.result.capabilities.tools);
 });
 

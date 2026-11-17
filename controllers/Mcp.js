@@ -25,6 +25,31 @@ const instanceContext = require("../lib/instance.js");
 // controller da tela chama, e passa pela MESMA permissão. Sem isso, o dia em que
 // a regra da tela mudar, a da ferramenta fica para trás — e ninguém percebe,
 // porque nada quebra: só passa a aceitar o que não devia.
+//
+// ── DUAS PERGUNTAS, E AGORA AS DUAS TÊM ONDE SER FEITAS (08/11/2026) ───────
+//
+// *"no SprintHub a gente escolhe quais ferramentas vão estar disponíveis"*.
+//
+//   PERMISSÃO    *esta PESSOA pode?* — o papel dela, igual ao da tela. Sempre
+//                existiu aqui, e continua sendo o teto.
+//
+//   ESCOPO       *esta CONEXÃO deveria?* — a lista guardada na chave de API.
+//                Não existia. Toda chave recebia as 83 ferramentas, limitada
+//                só pelo papel de quem a criou.
+//
+// O escopo só ESTREITA. Ver `alcancadas` em `lib/mcpTools.js`.
+//
+// ── E `tools/list` PASSOU A FILTRAR ────────────────────────────────────────
+//
+// Antes ele devolvia as 83 a qualquer autenticado, de propósito: o comentário
+// dizia que o modelo precisa saber o que existe para recusar com precisão.
+//
+// O argumento tem pé e perdeu para a conta: são 37.759 caracteres, ~9.400
+// tokens, em TODA listagem — pagos por uma recepcionista para receber o
+// esquema completo de `pessoa_excluir`, que ela descobre que não pode só
+// tentando. O modelo continua recusando com precisão; só que agora diz "não
+// tenho essa ferramenta" em vez de "você não tem essa permissão", e quem
+// precisa da segunda frase é a tela, não a porta.
 const VERSAO_PROTOCOLO = "2025-06-18";
 
 module.exports = function (app) {
@@ -49,13 +74,32 @@ module.exports = function (app) {
     const corpo = req.body || {};
     const id = corpo.id === undefined ? null : corpo.id;
 
+    // O que ESTA conexão alcança: a permissão da pessoa, estreitada pelo
+    // escopo da chave quando a entrada foi por chave. Pela sessão do app não
+    // há escopo — ali a conexão É a pessoa, e o papel dela já responde.
+    // TRÊS TETOS, e cada um só estreita:
+    //
+    //   permissão  o papel da pessoa — o mesmo da tela, e o de cima de todos
+    //   escopo     ONDE a conexão mexe (a lista de ferramentas da chave)
+    //   nível      O QUÃO FUNDO ela mexe (ler / escrever / apagar)
+    //
+    // Pela sessão do app não há chave, e portanto não há escopo nem nível:
+    // ali a conexão É a pessoa, e o papel dela já responde.
+    const escopo = req._apiKey ? app.api.apiKey.ferramentasDa(req._apiKey) : [];
+    const nivel = req._apiKey ? app.api.apiKey.nivelDe(req._apiKey) : "apagar";
+    const alcance = tools.alcancadas(
+      (permissao) => app.helpers.ReqProtected.has(user, permissao),
+      escopo,
+      nivel
+    );
+
     switch (corpo.method) {
       case "initialize":
         return res.send(
           ok(id, {
             protocolVersion: VERSAO_PROTOCOLO,
             capabilities: { tools: { listChanged: false } },
-            serverInfo: { name: "gofitnow", version: "1.0.0" },
+            serverInfo: { name: "vafit", version: "1.0.0" },
           })
         );
 
@@ -67,7 +111,7 @@ module.exports = function (app) {
         return res.send(ok(id, {}));
 
       case "tools/list":
-        return res.send(ok(id, { tools: tools.listar() }));
+        return res.send(ok(id, { tools: tools.listar(alcance) }));
 
       case "tools/call": {
         const nome = corpo.params?.name;
@@ -77,6 +121,11 @@ module.exports = function (app) {
           return res.send(falha(id, -32602, `Ferramenta desconhecida: ${nome}`));
         }
 
+        // AS DUAS RECUSAS SÃO SEPARADAS, e nesta ordem, porque o conserto de
+        // cada uma é outro: falta de permissão se resolve com quem administra a
+        // conta; fora do escopo se resolve na tela da chave. Uma mensagem só
+        // mandaria metade das pessoas para o lugar errado.
+        //
         // A permissão é a da TELA. Quem não cria pessoa clicando não cria por
         // aqui — e o motivo volta como resultado, não como erro de protocolo:
         // o modelo precisa poder dizer à pessoa o que faltou.
@@ -92,6 +141,39 @@ module.exports = function (app) {
               // `isError` é o que faz o cliente saber que a chamada NÃO deu
               // certo. Sem ele, um cliente que só olha o envelope trataria a
               // recusa como sucesso e seguiria em frente.
+              true
+            )
+          );
+        }
+
+        // Barrado pelo NÍVEL: a chave até alcança a área, mas não tem direito
+        // de ir tão fundo. Mensagem própria porque o conserto é outro — este
+        // se resolve subindo o nível da conexão, não acrescentando ferramenta.
+        if (!tools.alcancaNivel(nivel, ferramenta)) {
+          return res.send(
+            resultado(
+              id,
+              {
+                ok: false,
+                erro: "nivel_insuficiente",
+                detalhe: `Esta conexão é de nível "${nivel}" e "${nome}" exige "${tools.nivelDe(ferramenta)}".`,
+              },
+              true
+            )
+          );
+        }
+
+        // Fora do escopo da chave. A pessoa PODE — a chave é que não leva esta
+        // ferramenta.
+        if (!alcance.has(nome)) {
+          return res.send(
+            resultado(
+              id,
+              {
+                ok: false,
+                erro: "fora_do_escopo",
+                detalhe: `A chave usada não carrega "${nome}".`,
+              },
               true
             )
           );
@@ -149,6 +231,28 @@ module.exports = function (app) {
         return res.send(falha(id, -32601, `Método não suportado: ${corpo.method}`));
     }
   });
+
+  // ── GET E DELETE RESPONDEM 405, e isso IMPORTA (08/11/2026) ──────────────
+  //
+  // O transporte "Streamable HTTP" do MCP prevê que o cliente possa ABRIR UM
+  // FLUXO com `GET /mcp` (eventos que o servidor empurra) e encerrar a sessão
+  // com `DELETE /mcp`. Este servidor não tem sessão nem empurra nada: cada
+  // chamada é uma requisição inteira, e a resposta vem no corpo dela.
+  //
+  // Sem estas duas linhas o Express devolvia **404** — e 404 é a resposta
+  // errada por um motivo prático, não teórico: o cliente que sonda o GET lê
+  // "este endereço não existe" e desiste da conexão INTEIRA, inclusive do POST
+  // que funcionaria. Foi o que o teste de fora mostrou antes de existirem.
+  //
+  // 405 com `Allow: POST` é a resposta que o protocolo manda dar, e ela diz
+  // exatamente a coisa certa: o endereço existe, o método é que não.
+  function semFluxo(req, res) {
+    res.setHeader("Allow", "POST");
+    res.status(405).send(falha(null, -32601, "Este servidor MCP só aceita POST."));
+  }
+
+  app.get("/mcp", semFluxo);
+  app.delete("/mcp", semFluxo);
 
   // O envelope de conteúdo do MCP.
   //

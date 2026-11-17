@@ -19,6 +19,14 @@
       "text": "{{name}}, {{person}} booked {{service}} for {{when}}. Contact: {{contact}}. Open the calendar: {{url}}",
       "title": "{{name}}, a slot was booked on your calendar"
     },
+    "chargeLink": {
+      "subject": "Your {{valor}} charge — {{casa}}",
+      "title": "Hi, {{name}}!",
+      "body": "Here is the link to pay the <strong>{{valor}}</strong> charge{{descricao}}.<br><br>Due: <strong>{{vencimento}}</strong><br><br>The button below lets you choose how to pay.",
+      "button": "Pay now",
+      "footer": "Already paid? Then ignore this e-mail — it settles on its own.",
+      "text": "{{name}}, here is the link to pay {{valor}}, due {{vencimento}}: {{url}}"
+    },
     "deletion": {
       "body": "Someone requested, from inside your account, to delete it. <strong>Nothing has been deleted.</strong> We will get in touch to understand what happened and agree on the next steps — if you really want to leave, we will handle it with you.<br><br><strong>If this was not you</strong>, cancel the request at the address below and change your password.",
       "button": "View or cancel the request",
@@ -43,6 +51,30 @@
       "text": "{{name}}, {{trainerName}} granted you access to VAFIT.\n\nSign in at {{url}} with the e-mail {{email}} and the password agreed with {{trainerName}}.\n\nDo not know the password? Use \"I forgot my password\" on the sign-in screen.",
       "title": "{{name}}, your access is open"
     },
+    "planUnit": {
+      "subject": "New sign-up from the showcase: {{plano}}",
+      "title": "{{person}} signed up for {{plano}}",
+      "body": "A sign-up came in through the showcase, at <strong>{{unidade}}</strong>.<br><br>Name: <strong>{{person}}</strong><br>CPF: {{cpf}}<br>WhatsApp: {{whatsapp}}<br>E-mail: {{contact}}<br>Plan: <strong>{{plano}}</strong> — {{valor}}",
+      "button": "Open the profile",
+      "footer": "The membership is already in this person's finances. The charge shows up when you open Finance.",
+      "text": "{{person}} signed up for {{plano}} ({{unidade}}). CPF {{cpf}}, WhatsApp {{whatsapp}}, e-mail {{contact}}. Price {{valor}}. Open: {{url}}"
+    },
+    "planWelcome": {
+      "subject": "Your {{plano}} enrolment is created",
+      "title": "Thank you, {{name}}!",
+      "body": "Your enrolment in <strong>{{plano}}</strong> was created at <strong>{{unidade}}</strong>.<br><br>Price: <strong>{{valor}}</strong><br><br>The gym will contact you about payment and next steps.",
+      "button": "Talk to the gym",
+      "footer": "If this was not you, reply to this e-mail and we will undo it.",
+      "text": "{{name}}, your {{plano}} enrolment ({{unidade}}) is created. Price: {{valor}}. The gym will contact you about payment."
+    },
+    "planWelcomePay": {
+      "body": "Your <strong>{{plano}}</strong> membership was created at <strong>{{unidade}}</strong>.<br><br>Amount: <strong>{{valor}}</strong><br>Due: <strong>{{vencimento}}</strong><br><br>All that is left is the payment. The button below lets you choose how to pay.",
+      "button": "Pay now",
+      "footer": "If this was not you, reply to this e-mail and we will undo it.",
+      "subject": "Your {{plano}} membership is created — payment pending",
+      "text": "{{name}}, your {{plano}} membership ({{unidade}}) was created. Amount: {{valor}}, due {{vencimento}}. Pay at: {{url}}",
+      "title": "Thank you, {{name}}!"
+    },
     "request": {
       "body": "<strong>{{professionalName}}</strong> ({{professionalEmail}}) wants to follow you on VAFIT.<br><br>If you grant it, this person will see your history and build plans together with the other professionals who already care for you. You can revoke this access whenever you want.<br><br>The link is valid for <strong>{{days}} days</strong>.",
       "button": "See and answer the request",
@@ -64,6 +96,31 @@
     },
     "timeSheet": {
       "subject": "Your time sheet"
+    },
+    "appointmentDefaultWhat": "Appointment",
+    "appointmentPerson": {
+      "subject": "Appointment confirmed — {{when}}",
+      "title": "{{name}}, your appointment is confirmed",
+      "body": "You're booked: <strong>{{what}}</strong> with <strong>{{professional}}</strong>.<br><br>When: <strong>{{when}}</strong><br>Duration: {{duration}}<br>Where: {{place}}",
+      "button": "Open the app",
+      "footer": "The attached file adds this appointment to your phone's calendar. If you can't make it, let {{professional}} know in advance.",
+      "text": "{{name}}, you're booked: {{what}} with {{professional}}, {{when}} ({{duration}}), at {{place}}. Open the app: {{url}}"
+    },
+    "appointmentPersonNoApp": {
+      "subject": "Appointment confirmed — {{when}}",
+      "title": "{{name}}, your appointment is confirmed",
+      "body": "You're booked: <strong>{{what}}</strong> with <strong>{{professional}}</strong>.<br><br>When: <strong>{{when}}</strong><br>Duration: {{duration}}<br>Where: {{place}}",
+      "button": "Open the app",
+      "footer": "The attached file adds this appointment to your phone's calendar. If you can't make it, let {{professional}} know in advance.",
+      "text": "{{name}}, you're booked: {{what}} with {{professional}}, {{when}} ({{duration}}), at {{place}}."
+    },
+    "appointmentProfessional": {
+      "subject": "Booked: {{person}} — {{when}}",
+      "title": "{{name}}, a new appointment is on your schedule",
+      "body": "<strong>{{what}}</strong> with <strong>{{person}}</strong>.<br><br>When: <strong>{{when}}</strong><br>Duration: {{duration}}<br>Contact: {{contact}}",
+      "button": "Open the schedule",
+      "footer": "The attached file adds the appointment to your calendar. To reschedule or cancel, use the schedule.",
+      "text": "{{name}}, new on your schedule: {{what}} with {{person}}, {{when}} ({{duration}}). Contact: {{contact}}. Open the schedule: {{url}}"
     }
   }
 }

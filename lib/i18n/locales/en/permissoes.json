@@ -7,6 +7,7 @@
     "lastAccountManagingRolesEdit": "This is the last active account that manages permissions — promote another one before changing this.",
     "lastManagerGroup": "This group is what grants you permission to manage permissions. Deleting it would lock this screen.",
     "lastRoleManagingRoles": "This is the only type that still manages permissions, and it is yours. Give that permission to another type first.",
+    "needRolesManageToGrant": "Only someone who manages permissions can grant or edit administrator power.",
     "noPermission": "Your user type does not have permission for this.",
     "roleNameTaken": "A type with that name already exists.",
     "roleNotFound": "User type not found."
@@ -46,7 +47,7 @@
         "title": "Exercises"
       },
       "finance": {
-        "description": "Charges, payments and receipts",
+        "description": "Charges, subscriptions and receipts",
         "title": "Billing"
       },
       "foods": {
@@ -187,6 +188,18 @@
         "manage": {
           "hint": "Create charges and settle them. The screen is under construction.",
           "label": "Manage billing"
+        },
+        "recurrence": {
+          "hint": "Register the subscribed plan, which creates the charge on its own.",
+          "label": "Create and edit subscriptions"
+        },
+        "recurrenceAmount": {
+          "hint": "Without this, the amount is always the plan's — no discounts.",
+          "label": "Set the subscription amount"
+        },
+        "recurrenceDelete": {
+          "hint": "Take the subscription down. Charges already generated remain.",
+          "label": "Delete subscriptions"
         },
         "view": {
           "hint": "Open the billing tab and see charges. The screen is under construction.",

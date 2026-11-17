@@ -553,7 +553,140 @@ Workout_model.prototype.deleteAllOfStudent = async function (studentId) {
   const col = await this.workoutsCollection();
 
   const r = await col.deleteMany({ student: new ObjectId(studentId) });
+  // Os dias de treino concluído vão junto: são dado da pessoa, e a cascata que
+  // apaga a pessoa (User_model.apagarTudoDoAluno) chama só esta função.
+  const feitos = await this.logsCollection();
+  await feitos.deleteMany({ student: new ObjectId(studentId) });
   return r.deletedCount || 0;
+};
+
+// ── O TREINO CONCLUÍDO (16/11/2026) ──────────────────────────────────────
+//
+// *"gostaria de marcar se foi concluído ou não, aí poderia aparecer uma
+// animação"*. Um documento por (pessoa, treino, DIA): o treino da segunda é
+// feito toda segunda, e o que se marca é "fiz hoje", não "terminei o treino
+// para sempre". O índice único em database/schema.js faz o toque repetido
+// continuar sendo um treino só.
+//
+// O DIA é o de parede da CASA (`tempo.paredeDe(..., fuso).data`), e é quem
+// chama que o calcula: o modelo guarda a chave, não decide o relógio.
+Workout_model.prototype.logsCollection = async function () {
+  const db = await this.app.mongodb.connectToServer();
+  return db.collection("workout_logs");
+};
+
+// ── E EXERCÍCIO A EXERCÍCIO (16/11/2026) ────────────────────────────────
+//
+// *"o concluir treino ficou legal, mas queria concluir exercício por
+// exercício"*. O MESMO documento do dia guarda `exercises` (os ÍNDICES feitos
+// hoje) e `completed` (o treino concluído). Marcar o último exercício conclui o
+// treino sozinho — a decisão é daqui, para o app e o web concordarem.
+//
+// Índice, e não o id do exercício: o mesmo exercício pode aparecer duas vezes
+// no treino ("supino" no começo e no fim), e o que se marca é a POSIÇÃO. Se o
+// profissional reordenar o treino no meio do dia, as marcas de hoje podem cair
+// no vizinho — preço pequeno, e que some à meia-noite.
+//
+// Documento SEM `completed` é da primeira versão (só existia o "concluir
+// treino"): ele conta como concluído.
+const concluido = (doc) => Boolean(doc) && doc.completed !== false;
+
+Workout_model.prototype.marcarFeito = async function (studentId, workoutId, dia, origem) {
+  if (!ObjectId.isValid(studentId) || !ObjectId.isValid(workoutId)) return false;
+  const col = await this.logsCollection();
+  const chave = { student: new ObjectId(studentId), workout: new ObjectId(workoutId), day: String(dia) };
+  await col.updateOne(
+    chave,
+    {
+      $set: { completed: true, completedAt: new Date() },
+      $setOnInsert: { at: new Date(), origem: origem === "web" ? "web" : "app", exercises: [] },
+    },
+    { upsert: true }
+  );
+  return true;
+};
+
+// Desfazer o CONCLUÍDO não apaga os exercícios marcados: quem tocou em
+// "desfazer" por engano não pode perder as oito marcas do treino. Só quando não
+// sobra exercício nenhum o dia some de vez.
+Workout_model.prototype.desmarcarFeito = async function (studentId, workoutId, dia) {
+  if (!ObjectId.isValid(studentId) || !ObjectId.isValid(workoutId)) return false;
+  const col = await this.logsCollection();
+  const chave = { student: new ObjectId(studentId), workout: new ObjectId(workoutId), day: String(dia) };
+  const r = await col.updateOne(chave, { $set: { completed: false }, $unset: { completedAt: "" } });
+  await col.deleteOne({ ...chave, completed: false, exercises: { $size: 0 } });
+  // O documento da primeira versão não tem `exercises`: o `$size` não o pega.
+  await col.deleteOne({ ...chave, completed: false, exercises: { $exists: false } });
+  return r.matchedCount > 0;
+};
+
+// Marca (ou desmarca) UM exercício de hoje. `total` é quantos o treino tem: é
+// com ele que se sabe se este era o último. Devolve `{ completou }` — true só
+// quando ESTA marca concluiu o treino, para a tela comemorar uma vez só.
+Workout_model.prototype.marcarExercicio = async function (studentId, workoutId, dia, indice, feito, total, origem) {
+  if (!ObjectId.isValid(studentId) || !ObjectId.isValid(workoutId)) return { completou: false };
+  const col = await this.logsCollection();
+  const chave = { student: new ObjectId(studentId), workout: new ObjectId(workoutId), day: String(dia) };
+
+  if (!feito) {
+    // Tirar uma marca tira o concluído junto: o treino deixou de estar todo
+    // feito. Quem concluiu pelo botão e desmarca um exercício está dizendo o
+    // mesmo.
+    await col.updateOne(chave, { $pull: { exercises: indice }, $set: { completed: false }, $unset: { completedAt: "" } });
+    await col.deleteOne({ ...chave, completed: false, exercises: { $size: 0 } });
+    return { completou: false };
+  }
+
+  await col.updateOne(
+    chave,
+    {
+      $addToSet: { exercises: indice },
+      $setOnInsert: { at: new Date(), origem: origem === "web" ? "web" : "app", completed: false },
+    },
+    { upsert: true }
+  );
+
+  const doc = await col.findOne(chave);
+  if (!doc || concluido(doc) || !(total > 0)) return { completou: false };
+
+  const marcados = new Set(doc.exercises || []);
+  for (let i = 0; i < total; i++) {
+    if (!marcados.has(i)) return { completou: false };
+  }
+
+  await col.updateOne(chave, { $set: { completed: true, completedAt: new Date() } });
+  return { completou: true };
+};
+
+// O resumo de cada treino da pessoa: concluído hoje?, quantas vezes, o último
+// dia, e QUAIS exercícios estão marcados hoje. UMA consulta para a lista
+// inteira — a tela de treinos mostra todos.
+Workout_model.prototype.feitosDaPessoa = async function (studentId, hoje) {
+  if (!ObjectId.isValid(studentId)) return {};
+  const col = await this.logsCollection();
+  const docs = await col
+    .find(
+      { student: new ObjectId(studentId) },
+      { projection: { workout: 1, day: 1, completed: 1, exercises: 1 } }
+    )
+    .toArray();
+
+  const porTreino = {};
+  for (const d of docs) {
+    const id = String(d.workout);
+    const atual = porTreino[id] || { today: false, count: 0, last: null, exercises: [] };
+    const completo = concluido(d);
+    if (completo) {
+      atual.count += 1;
+      if (!atual.last || d.day > atual.last) atual.last = d.day;
+    }
+    if (d.day === hoje) {
+      atual.today = completo;
+      atual.exercises = [...(d.exercises || [])].sort((a, b) => a - b);
+    }
+    porTreino[id] = atual;
+  }
+  return porTreino;
 };
 
 // Copia o treino inteiro — exercícios e séries — para a mesma pessoa ou outra.
@@ -601,14 +734,19 @@ Workout_model.prototype.saveExercises = async function (trainerId, id, exercises
   //
   // Ver lib/tetosEstruturais.js para os números e o porquê de duas camadas.
   const cleaned = tetos.cortar(exercises || [], "exercisesPerWorkout").map((e, i) => ({
-    // `exerciseId` aponta para o catálogo, mas nome, grupo e miniatura são
-    // COPIADOS: se o exercício sair do catálogo, o treino já montado continua
-    // legível — e a etiqueta de grupo muscular da listagem não some.
+    // `exerciseId` aponta para o catálogo, mas nome e grupo são COPIADOS: se o
+    // exercício sair do catálogo, o treino já montado continua legível — e a
+    // etiqueta de grupo muscular da listagem não some.
+    //
+    // A MINIATURA já não é copiada (21/10/2026). Ela era `thumbUrl`, a capa do
+    // vídeo do YouTube, e saiu junto com o vídeo. A demonstração de hoje é o
+    // clipe em 3D, e ele NÃO entra no retrato de propósito: a chave é do
+    // catálogo, e um retrato de dois meses atrás apontaria para um movimento que
+    // já foi regravado ou renomeado. Quem quer o clipe pede por `exerciseId`
+    // (ver `clipesPorExercicio`), que lê sempre o de agora.
     exerciseId: ObjectId.isValid(e.exerciseId) ? new ObjectId(e.exerciseId) : null,
     name: String(e.name || "").trim(),
     muscleGroup: e.muscleGroup ? String(e.muscleGroup).trim() : "",
-    thumbUrl: e.thumbUrl || null,
-    videoUrl: e.videoUrl || null,
     order: i,
     method: e.method ? String(e.method).trim() : "",
     goal: e.goal ? String(e.goal).trim() : "",

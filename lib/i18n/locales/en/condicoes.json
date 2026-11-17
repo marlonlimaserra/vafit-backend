@@ -1,0 +1,88 @@
+{
+  "condicoes": {
+    "cat": {
+      "acesso": "Access",
+      "aula": "Group classes",
+      "avaliacao": "Assessment",
+      "contato": "Contact",
+      "dieta": "Diet",
+      "financeiro": "Finance",
+      "frequencia": "Attendance",
+      "pendencias": "Open items"
+    },
+    "cond": {
+      "acesso_app": "App access",
+      "aula_qual": "Attended the class",
+      "aula_total": "Classes attended",
+      "aula_ultima": "Last class attended",
+      "avaliacao_tem": "Physical assessment",
+      "avaliacao_ultima": "Last assessment",
+      "cadastrado_em": "Sign-up date",
+      "cobranca_aberta": "Open charge",
+      "cobranca_valor": "Amount due",
+      "cobranca_vencida": "Overdue charge",
+      "dieta_alimento": "Food in the plan",
+      "dieta_carboidrato": "Carbs (g)",
+      "dieta_gordura": "Fat (g)",
+      "dieta_kcal": "Calories (kcal)",
+      "dieta_proteina": "Protein (g)",
+      "dieta_vigente": "Current diet",
+      "email": "Email",
+      "foto": "Photo",
+      "frequencia_total": "Visits",
+      "frequencia_ultima": "Last visit",
+      "nascimento": "Date of birth",
+      "nome": "Name",
+      "passagem": "Gate access",
+      "pendencia_aberta": "Open item",
+      "pendencia_total": "How many open items",
+      "sexo": "Sex",
+      "status": "Status in your list",
+      "unidade": "Unit",
+      "whatsapp": "WhatsApp"
+    },
+    "op": {
+      "antes": "Before",
+      "contem": "Contains",
+      "depois": "From",
+      "dia": "On this day",
+      "e": "Is",
+      "entre": "Between",
+      "maior": "Greater than",
+      "menor": "Less than",
+      "nao_contem": "Does not contain",
+      "nao_e": "Is not",
+      "preenchido": "Is filled",
+      "vazio": "Is empty"
+    },
+    "val": {
+      "ativo": "Active",
+      "female": "Female",
+      "inativo": "Inactive",
+      "male": "Male",
+      "sem": "No sex recorded"
+    },
+    "sim": {
+      "_": "Yes",
+      "acesso_app": "Enabled",
+      "avaliacao_tem": "Has",
+      "cobranca_aberta": "Has",
+      "cobranca_vencida": "Has",
+      "dieta_vigente": "Has",
+      "foto": "Has",
+      "passagem": "Released",
+      "pendencia_aberta": "Has"
+    },
+    "nao": {
+      "_": "No",
+      "acesso_app": "Blocked",
+      "avaliacao_tem": "Doesn't have",
+      "cobranca_aberta": "Doesn't have",
+      "cobranca_vencida": "Doesn't have",
+      "dieta_vigente": "Doesn't have",
+      "foto": "Doesn't have",
+      "passagem": "Blocked",
+      "pendencia_aberta": "Doesn't have"
+    }
+  }
+}

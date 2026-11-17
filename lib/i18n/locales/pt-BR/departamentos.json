@@ -2,6 +2,8 @@
   "errors": {
     "departmentNoName": "O departamento precisa de um nome",
     "departmentNotFound": "Departamento não encontrado",
-    "departmentTaken": "Já existe um departamento com esse nome"
+    "departmentTaken": "Já existe um departamento com esse nome",
+    "tabNoName": "A aba precisa de um nome",
+    "tabNotFound": "Aba não encontrada"
   }
 }

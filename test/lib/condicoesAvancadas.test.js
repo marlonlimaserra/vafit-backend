@@ -1,7 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { catalogo, traduzir, quantas, usaVinculo } = require("../../lib/condicoes");
+const { catalogo, categorias, traduzir, quantas, usaVinculo } = require("../../lib/condicoes");
+const { translator } = require("../../lib/i18n");
 
 // O FILTRO AVANÇADO — e o que ele NÃO pode deixar passar.
 //
@@ -899,4 +900,60 @@ test("a lista de aulas é uma FONTE viva, resolvida pela tela", () => {
   const def = catalogo().find((c) => c.chave === "aula_qual");
 
   assert.equal(def.fonte, "aulas");
+});
+
+// ── AS PALAVRAS VIAJAM COM A CONDIÇÃO ─────────────────────────────────────
+//
+// *"no app o filtro avançado ficou todo bugado"* (10/10/2026). O app
+// instalado conhecia as condições de uma hora antes e escreveu
+// `cond_dieta_kcal` na tela. O catálogo é do servidor; o rótulo era do
+// cliente — e enquanto fosse, toda condição nova nasceria assim.
+test("o catálogo sai traduzido, e nenhuma chave crua escapa para a tela", () => {
+  const t = translator("pt-BR");
+
+  for (const c of catalogo([], t)) {
+    // O rótulo cair na própria chave é EXATAMENTE o defeito que isto
+    // conserta: `cond_dieta_kcal` escrito na cara de quem filtra.
+    assert.notEqual(c.rotulo, c.chave, `condição sem rótulo: ${c.chave}`);
+
+    for (const o of c.operadores) {
+      assert.ok(c.ops[o] && c.ops[o] !== o, `operador sem palavra: ${c.chave}/${o}`);
+    }
+
+    if (c.tipo === "booleano") assert.ok(c.sim && c.nao);
+    if (c.tipo === "opcao") for (const o of c.opcoes) assert.ok(c.rotulos[o]);
+  }
+
+  for (const g of categorias(t)) assert.notEqual(g.rotulo, g.chave);
+});
+
+test("numa data, 'é' é 'Nesse dia' — e quem decide isso é o servidor", () => {
+  // A regra dependia do TIPO, e por isso morava nos dois clientes em duas
+  // cópias. Quem conhece o tipo é o catálogo.
+  const t = translator("pt-BR");
+  const data = catalogo([], t).find((c) => c.chave === "cadastrado_em");
+  const texto = catalogo([], t).find((c) => c.chave === "nome");
+
+  assert.equal(data.ops.e, "Nesse dia");
+  assert.equal(texto.ops.contem, "Contém");
+});
+
+test("sem tradutor, o catálogo continua sendo só o catálogo", () => {
+  // Quem TRADUZ uma árvore não desenha nada. Buscar rótulo em toda listagem
+  // de pessoas seria trabalho jogado fora.
+  const c = catalogo().find((x) => x.chave === "passagem");
+
+  assert.equal(c.rotulo, undefined);
+  assert.equal(c.ops, undefined);
+});
+
+test("o campo customizado mantém o nome que a CASA deu", () => {
+  // Ele já vem com `rotulo` — "Convênio" é um nome escolhido pela academia, e
+  // nenhuma tradução nossa poderia conhecê-lo. O tradutor não pode atropelar.
+  const t = translator("en");
+  const [c] = catalogo([{ chave: "campo_convenio", categoria: "contato", tipo: "texto", rotulo: "Convênio" }], t)
+    .filter((x) => x.chave === "campo_convenio");
+
+  assert.equal(c.rotulo, "Convênio");
+  assert.equal(c.ops.contem, "Contains");
 });

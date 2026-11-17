@@ -1,0 +1,21 @@
+{
+  "errors": {
+    "gatewayUnknown": "Esse gateway de pagamento não existe",
+    "gatewayNoKey": "Cole a chave de API do gateway",
+    "gatewayBadKey": "O gateway recusou essa chave. Confira se ela foi copiada inteira.",
+    "gatewayWrongKeyType": "Essa é a chave pública (pk_), que só serve para tokenizar cartão. A integração precisa da chave secreta (sk_) — crie uma na mesma tela.",
+    "gatewayUnreachable": "Não deu para falar com o gateway agora. A chave pode estar certa — tente de novo em instantes.",
+    "gatewayNotSet": "Configure esse gateway antes de escolher ele",
+    "gatewayNoTokenize": "Esse gateway não guarda cartão",
+    "cardNoPerson": "Essa pessoa não existe",
+    "cardNotFound": "Esse cartão não está mais guardado",
+    "cardNoGateway": "A unidade desta pessoa não tem um gateway que guarde cartão",
+    "cardNoTokenization": "A conta do gateway ainda não tem a tokenização de cartão liberada. Peça ao suporte deles e marque a caixa em Configurações › Gateways de pagamento.",
+    "cardNoDocument": "Informe o CPF do titular — o gateway exige para guardar o cartão",
+    "cardHolderIncomplete": "Faltam dados do titular que o gateway exige: nome, e-mail, CPF, telefone, CEP e número do endereço",
+    "cardBadDocument": "O CPF do titular tem de ter 11 dígitos (ou 14, se for CNPJ)",
+    "cardBadZip": "O CEP do titular tem de ter 8 dígitos",
+    "cardIncomplete": "Faltou algum dado do cartão",
+    "cardRefused": "O gateway não guardou esse cartão."
+  }
+}

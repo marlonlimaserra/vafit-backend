@@ -1,4 +1,5 @@
 const rateLimit = require("../lib/rateLimit.js");
+const mcpTools = require("../lib/mcpTools.js");
 
 // Autenticação por chave de API, alternativa ao cabeçalho `session`.
 //
@@ -78,7 +79,9 @@ ApiKeyAuth.prototype.protect = async function (req, res) {
   }
 
   const user = await this.app.api.user.data(doc.user);
-  if (!user || user.active === 0) {
+  // Conta apagada, desativada ou com acesso BLOQUEADO não entra por chave — do
+  // mesmo jeito que não entra por sessão. Bloquear fecha TODAS as portas.
+  if (!user || user.active === 0 || user.appBloqueado === true) {
     res.status(401).send({ msg: req.t("errors.unavailableAccount") });
     return false;
   }
@@ -90,7 +93,56 @@ ApiKeyAuth.prototype.protect = async function (req, res) {
 
   this.app.api.apiKey.touch(doc._id);
 
-  return await this.app.api.user.withRole(user);
+  const comPapel = await this.app.api.user.withRole(user);
+
+  // ── A CHAVE RESPEITA O PRÓPRIO ESCOPO E NÍVEL NO REST TAMBÉM ──────────────
+  //
+  // O `/mcp` gateia ferramenta por ferramenta (ver controllers/Mcp.js) e por
+  // isso recebe a pessoa INTEIRA — ele estreita sozinho, três vezes. Toda OUTRA
+  // rota REST não sabia de escopo nenhum: `withRole` devolvia o poder cheio, e
+  // a chave "só leitura, 3 ferramentas" apagava pela porta REST o que o painel
+  // jurava que ela não tocava. Aqui a chave passa a valer no REST o MESMO que
+  // vale no MCP. `/mcp` fica de fora de propósito: lá o gate é dele.
+  if (req.path !== "/mcp") {
+    const nivel = this.app.api.apiKey.nivelDe(doc);
+    const metodo = String(req.method || "").toUpperCase();
+    const soLeitura = metodo === "GET" || metodo === "HEAD" || metodo === "OPTIONS";
+
+    // NÍVEL como teto de ação: "ler" não escreve nada; "escrever" cria e edita,
+    // mas nunca apaga; "apagar" (e as chaves antigas, sem o campo) não restringe.
+    if ((nivel === "ler" && !soLeitura) || (nivel === "escrever" && metodo === "DELETE")) {
+      this.app.api.apiCall.record({
+        user: doc.user,
+        apiKey: doc._id,
+        prefix: doc.prefix,
+        method: req.method,
+        path: req.originalUrl || req.url,
+        status: 403,
+        ip: req.clientIp,
+        userAgent: req.headers["user-agent"],
+      });
+      res.status(403).send({ msg: req.t("errors.apiKeyLevelTooLow", { nivel }), code: "api_key_level" });
+      return false;
+    }
+
+    // ESCOPO como teto de permissão: a chave só carrega as permissões das
+    // ferramentas escolhidas. Vazio é TODAS — a mesma convenção do MCP, e o que
+    // mantém a chave legada (sem escopo) exatamente como era.
+    const escopo = this.app.api.apiKey.ferramentasDa(doc);
+    if (Array.isArray(escopo) && escopo.length) {
+      const permitidas = new Set();
+      for (const nome of escopo) {
+        const f = mcpTools.achar(nome);
+        if (f) permitidas.add(f.permissao);
+      }
+      comPapel.permissions = (comPapel.permissions || []).filter((p) => permitidas.has(p));
+      // Escopo explícito não herda o atalho de admin: há rota que lê
+      // `user.admin` direto (PermissionGroup), e uma chave estreita não é admin.
+      comPapel.admin = false;
+    }
+  }
+
+  return comPapel;
 };
 
 module.exports = ApiKeyAuth;

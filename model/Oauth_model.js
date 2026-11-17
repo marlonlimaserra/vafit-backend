@@ -48,6 +48,9 @@ const BACKEND = process.env.BACKEND_URL || "https://backend.vafit.app";
 const BACKEND_POR_PROVEDOR = {
   facebook: process.env.BACKEND_URL_FACEBOOK || BACKEND,
   google: process.env.BACKEND_URL_GOOGLE || BACKEND,
+  // APPLE: nasceu em `backend.vafit.app` (16/11/2026), cadastrado como "Return
+  // URL" do Services ID no portal da Apple antes do primeiro clique.
+  apple: process.env.BACKEND_URL_APPLE || BACKEND,
 };
 
 // O domínio base, para remontar o endereço de volta a partir do NOME da
@@ -120,6 +123,11 @@ Oauth_model.prototype.nomesDasChaves = function () {
   // MESMA leitura das chaves — uma consulta a mais por clique de login seria
   // paga para sempre por um valor que muda uma vez por ano.
   if (this.CHAVE_VERSAO) nomes.push(this.CHAVE_VERSAO);
+  // Os campos que só UM provedor tem. A Apple não entrega segredo pronto: ela
+  // entrega uma chave privada, e o segredo é assinado aqui a cada login — para
+  // isso faltam o time e o id da chave (ver `OauthApple_model.js`). Entram na
+  // mesma leitura, pelo mesmo motivo da versão.
+  for (const extra of this.CHAVES_EXTRAS || []) nomes.push(`oauth.${p}.${extra}`);
   return nomes;
 };
 
@@ -144,8 +152,18 @@ Oauth_model.prototype.chaves = async function () {
   const clientId = String(v[nomeId] || "").trim();
   const clientSecret = String(v[nomeSegredo] || "").trim();
 
+  // Os extras contam para o `ligado` do mesmo jeito que o par: a Apple sem o
+  // id da chave mandaria a pessoa ao consentimento e recusaria na volta, depois
+  // de ela já ter aprovado — o pior momento para descobrir.
+  const extras = {};
+  for (const extra of this.CHAVES_EXTRAS || []) {
+    extras[extra] = String(v[`oauth.${this.PROVEDOR}.${extra}`] || "").trim();
+  }
+  const extrasCompletos = Object.values(extras).every(Boolean);
+
   return {
-    ligado: Boolean(v[nomeLigado]) && Boolean(clientId) && Boolean(clientSecret),
+    ...extras,
+    ligado: Boolean(v[nomeLigado]) && Boolean(clientId) && Boolean(clientSecret) && extrasCompletos,
     clientId,
     clientSecret,
     // Vazia quer dizer "use o padrão do código". Quem valida o formato é o

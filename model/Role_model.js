@@ -280,7 +280,50 @@ Role_model.prototype.ensureSystemRoles = async function () {
       }
     }
   }
+
+  await liberarRecorrenciaParaQuemJaPodia(this.app, col);
 };
+
+// ── UMA CHAVE NOVA NÃO PODE TIRAR PODER DE NINGUÉM (15/10/2026) ──────────
+//
+// As três chaves de mensalidade (`finance.recurrence`, `recurrenceDelete`,
+// `recurrenceAmount`) nasceram de dentro de `finance.manage`: até ontem quem
+// tinha essa chave criava, apagava e dava o preço que quisesse.
+//
+// Sem este passo, o deploy REVOGARIA em silêncio — a recepção abriria a ficha
+// e o botão de nova mensalidade teria sumido, sem erro nenhum para explicar.
+// O Administrador se resolve sozinho (é sincronizado com `ALL` logo acima);
+// os papéis que a casa criou é que precisam herdar.
+//
+// ── E POR QUE UMA MARCA, e não só um filtro esperto ─────────────────────
+//
+// Porque isto roda a CADA BOOT. Um filtro do tipo "tem manage e não tem as
+// novas" desfaria a decisão de quem tirasse as três de propósito: o admin
+// desmarca, o servidor reinicia, e elas voltam. A marca em `configurations`
+// é o que faz a herança acontecer UMA vez na vida de cada cliente.
+//
+// Pode sair daqui quando as oito instâncias tiverem bootado uma vez.
+const NOVAS_DA_RECORRENCIA = [
+  "finance.recurrence",
+  "finance.recurrenceDelete",
+  "finance.recurrenceAmount",
+];
+
+async function liberarRecorrenciaParaQuemJaPodia(app, col) {
+  const db = await app.mongodb.connectToServer();
+  const configuracoes = db.collection("configurations");
+  const CHAVE = "migracao_permissao_recorrencia";
+
+  if (await configuracoes.findOne({ chave: CHAVE })) return;
+
+  const r = await col.updateMany(
+    { permissions: "finance.manage" },
+    { $addToSet: { permissions: { $each: NOVAS_DA_RECORRENCIA } }, $set: { updatedAt: new Date() } }
+  );
+
+  await configuracoes.insertOne({ chave: CHAVE, quando: new Date(), papeis: r.modifiedCount });
+  if (r.modifiedCount) console.log(`[schema] mensalidade: ${r.modifiedCount} papel(éis) herdaram as chaves novas`);
+}
 
 module.exports = Role_model;
 module.exports.ADMIN_NAME = ADMIN_NAME;

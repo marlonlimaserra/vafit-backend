@@ -1,6 +1,6 @@
 {
   "errors": {
-    "billingOff": "A cobrança não está ligada nesta instalação. Fale com o suporte.",
+    "billingOff": "A cobrança automática não está ligada nesta instalação. Fale com o suporte.",
     "chargeNotFound": "Cobrança não encontrada.",
     "checkoutFailed": "Não consegui abrir a tela de pagamento. Tente de novo em alguns minutos.",
     "invalidReceipt": "Comprovante inválido. Use imagem ou PDF de até 8 MB.",
@@ -10,8 +10,21 @@
     "paymentMethodNotFound": "Forma de pagamento não encontrada.",
     "paymentMethodSystem": "As formas originais não podem ser apagadas — desative para tirá-la do seletor.",
     "paymentNotFound": "Pagamento não encontrado.",
-    "recurrenceNotFound": "Recorrência não encontrada.",
-    "requireAmount": "Informe o valor."
+    "recurrenceAmountLocked": "O valor vem do plano. Escolha um plano — ou peça a permissão para definir o valor.",
+    "recurrenceNotFound": "Assinatura não encontrada.",
+    "requireAmount": "Informe o valor.",
+    "installmentInvalid": "Parcelamento inválido: informe o valor total e de 2 a 48 parcelas.",
+    "chargeAlreadyAtGateway": "Esta cobrança já foi gerada no gateway. Cancele a fatura de lá antes de gerar outra.",
+    "chargeNotOpen": "Esta cobrança não está em aberto — não há o que cobrar.",
+    "chargeGateway": "O gateway não aceitou a cobrança.",
+    "chargeNotAtGateway": "Esta cobrança não foi gerada no gateway — não há fatura para estornar.",
+    "chargeRefund": "O gateway não aceitou o estorno.",
+    "chargeNoLink": "Esta cobrança não tem link de pagamento para mandar.",
+    "personNoEmail": "Esta pessoa não tem e-mail cadastrado.",
+    "chargeEmail": "Não deu para mandar o e-mail agora.",
+    "chargeHasPayments": "Esta cobrança já recebeu dinheiro. Apague o recebimento (ou estorne) antes de removê-la.",
+    "chargeGatewayCancel": "O gateway não aceitou cancelar a fatura, então a cobrança continua em aberto aqui. Se ela já foi paga, o caminho é estornar.",
+    "chargeGatewayDelete": "O gateway não aceitou apagar a fatura, então a cobrança continua aqui."
   },
   "finance": {
     "every": {
@@ -23,12 +36,29 @@
       "semiannual": "Semestral",
       "weekly": "Semanal"
     },
+    "gatewayState": {
+      "approved": "Aprovado na análise",
+      "authorized": "Autorizado no cartão",
+      "refunding": "Estorno em andamento",
+      "refused": "Recusado na análise",
+      "underReview": "Em análise de risco"
+    },
+    "method": {
+      "billet": "Boleto",
+      "cash": "Dinheiro",
+      "credit": "Cartão de crédito",
+      "debit": "Cartão de débito",
+      "other": "Outra",
+      "pix": "Pix",
+      "transfer": "Transferência"
+    },
     "paymentStatus": {
       "canceled": "Cancelado",
       "paid": "Pago",
       "pending": "Pendente",
       "refunded": "Reembolsado"
     },
+    "recurrenceCanceledAtGateway": "Assinatura cancelada no gateway de pagamento.",
     "recurrenceStatus": {
       "active": "Ativa",
       "canceled": "Cancelada"
@@ -38,6 +68,14 @@
       "late": "Atrasada",
       "open": "Em aberto",
       "paid": "Paga"
+    }
+  },
+  "gatewayLog": {
+    "estado": {
+      "aplicado": "Aplicado",
+      "ignorado": "Sem dono aqui",
+      "recusado": "Recusado",
+      "erro": "Erro nosso"
     }
   }
 }

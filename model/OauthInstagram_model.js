@@ -179,6 +179,42 @@ OauthInstagram_model.prototype.perfil = async function (token) {
   return r.json();
 };
 
+// ── A CONTA AINDA FALA COM A GENTE? ──────────────────────────────────────
+//
+// O mesmo selo da Página (ver `OauthPagina_model.conferir`), com UMA pergunta
+// só: no Instagram não existe assinar conta a conta — o webhook é do app, e
+// quem o liga é o console da Meta. Então aqui nunca há `muda`.
+//
+// Aproveita a ida para trazer @ e foto frescos: é o que conserta, sem
+// reconectar, a foto das contas ligadas antes de 15/10/2026, quando o que se
+// guardava era a URL do CDN em vez dos bytes.
+OauthInstagram_model.prototype.conferir = async function (conta) {
+  const token = String(conta?.token || "");
+  if (!token) return { estado: "expirada", detalhe: "sem token" };
+
+  try {
+    const quem = await this.perfil(token);
+
+    if (quem?.erro) {
+      // `perfil` devolve `graph_<status>`. 400 e 401 do Instagram Graph com
+      // token na mão são sempre o token: ele venceu, foi revogado, ou a
+      // pessoa tirou o app. Qualquer outro status é problema do lado de lá.
+      const status = Number(String(quem.erro).replace("graph_", ""));
+      const estado = status === 400 || status === 401 || status === 403 ? "expirada" : "fora_do_ar";
+      return { estado, detalhe: String(quem.detalhe || quem.erro).slice(0, 200) };
+    }
+
+    return {
+      estado: "ok",
+      nome: String(quem.name || ""),
+      usuario: String(quem.username || ""),
+      foto: String(quem.profile_picture_url || ""),
+    };
+  } catch (erro) {
+    return { estado: "fora_do_ar", detalhe: String(erro?.message || "").slice(0, 200) };
+  }
+};
+
 // O caminho inteiro, para o controlador não conhecer as três etapas: código →
 // token curto → token de 60 dias → quem é.
 OauthInstagram_model.prototype.contaDoCodigo = async function (code, chaves) {

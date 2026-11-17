@@ -102,6 +102,21 @@ test("token válido apontando para conta apagada também derruba a sessão", asy
   assert.deepEqual(apagados, ["tok"]);
 });
 
+test("token válido de conta com acesso BLOQUEADO derruba a sessão", async () => {
+  // Bloquear o acesso ao app tem de valer para a sessão que a pessoa já tinha
+  // aberta — não só impedir um login novo. Sem isto ela seguia dentro por até
+  // 30 dias. Ver `appBloqueado` em ReqProtected.
+  const { app, apagados } = monta({
+    sessao: { token: "tok", user: "u1" },
+    usuario: { _id: "u1", active: 1, appBloqueado: true },
+  });
+  const { r, res } = resposta();
+
+  assert.equal(await app.helpers.ReqProtected.verify(req({ session: "tok" }), res), false);
+  assert.equal(r.status, 401);
+  assert.deepEqual(apagados, ["tok"], "o token tem de morrer, não só ser recusado");
+});
+
 test("sem a permissão: 403, e a chave exigida vai na resposta", async () => {
   const { app } = monta({
     sessao: { token: "tok", user: "u1" },

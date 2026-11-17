@@ -3,6 +3,7 @@ const { centavos } = require("./Service_model.js");
 const tempo = require("../lib/tempo.js");
 const statusDeCobranca = require("../lib/statusDeCobranca.js");
 const statusDePagamento = require("../lib/statusDePagamento.js");
+const situacaoNoGateway = require("../lib/situacaoNoGateway.js");
 const instanceContext = require("../lib/instance.js");
 const { parseDataUri } = require("../lib/imageDataUri.js");
 const { porPagina } = require("../lib/tetoDaLista.js");
@@ -97,12 +98,7 @@ function entrou(pagamento) {
 }
 
 const MAX_COMPROVANTE = 10 * 1024 * 1024;
-const TIPOS_COMPROVANTE = [
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "application/pdf",
-];
+const TIPOS_COMPROVANTE = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
 
 Finance_model.prototype.charges = async function () {
   const db = await this.app.mongodb.connectToServer();
@@ -128,9 +124,23 @@ function limparCobranca(obj) {
   return {
     amount: centavos(obj.amount),
     dueDate: dataOuHoje(obj.dueDate),
-    description: String(obj.description || "").trim().slice(0, 200),
+    description: String(obj.description || "")
+      .trim()
+      .slice(0, 200),
     status: STATUS.includes(obj.status) ? obj.status : "open",
-    note: String(obj.note || "").trim().slice(0, 2000),
+    note: String(obj.note || "")
+      .trim()
+      .slice(0, 2000),
+    // ── A FORMA COMO ELA DEVE SER PAGA ────────────────────────────────
+    //
+    // *"mostre o select de método de pagamento aqui"* (18/10/2026). É uma
+    // INTENÇÃO, não um fato: o fato mora no pagamento, que diz como o
+    // dinheiro de verdade entrou.
+    //
+    // VAZIO é o padrão e quer dizer "todas": a fatura do gateway abre com
+    // pix, boleto e cartão, e quem escolhe é quem paga. Escolher uma aqui é
+    // o que faz o boleto sair só como boleto — ver `formaDeCobranca`.
+    method: FORMATO_DA_FORMA.test(String(obj.method || "")) ? String(obj.method) : "",
   };
 }
 
@@ -143,7 +153,9 @@ function limparPagamento(obj) {
     // vem de uma lista fechada na tela, e um erro aqui é mais provável ser
     // versão velha do navegador que má-fé.
     status: STATUS_PAGAMENTO.includes(obj.status) ? obj.status : "paid",
-    note: String(obj.note || "").trim().slice(0, 2000),
+    note: String(obj.note || "")
+      .trim()
+      .slice(0, 2000),
   };
 }
 
@@ -213,6 +225,390 @@ Finance_model.prototype.insertCharge = async function (studentId, obj, createdBy
   return r.insertedId;
 };
 
+// ── O PARCELAMENTO: UM VALOR EM N VEZES ───────────────────────────────────
+//
+// *"crie a aba parcelamento pois o asaas pode criar parcelamento também"*
+// (17/10/2026).
+//
+// ── NÃO É UMA COLEÇÃO NOVA, E ISSO É A DECISÃO ──────────────────────────
+//
+// Um parcelamento NÃO é uma regra que roda: ele nasce inteiro e acaba no
+// mesmo instante. Doze parcelas são doze cobranças criadas de uma vez, e
+// depois disso não há nada a executar — nada para pausar, nada para gerar
+// amanhã.
+//
+// A assinatura é o contrário, e por isso ELA tem coleção, estado e um
+// `gerar()` que roda a cada leitura da tela. Dar a mesma máquina ao
+// parcelamento criaria um gerador que nunca gera.
+//
+// Então o parcelamento É o conjunto das parcelas: três campos na cobrança —
+// `installment` (o id do grupo), `parcela` e `parcelas` — e a aba lista os
+// grupos por agregação. Sem coleção nova, sem documento que pode discordar
+// das cobranças que ele diz ter.
+//
+// ── A SOBRA DOS CENTAVOS VAI NA PRIMEIRA ────────────────────────────────
+//
+// R$ 100,00 em 3 dá 33,333... Arredondar cada parcela para 33,33 cobra
+// R$ 99,99 — um centavo a menos que o combinado, e quem descobre é quem
+// fecha o mês. A sobra inteira vai para a PRIMEIRA parcela (33,34 + 33,33 +
+// 33,33), que é o que todo carnê faz: o cliente paga a diferença no começo,
+// quando ainda está decidindo, e não no fim, quando já esqueceu.
+Finance_model.prototype.parcelar = async function (studentId, obj, createdBy, currency) {
+  const col = await this.charges();
+
+  // O TETO corta; o PISO recusa. São erros diferentes: 120 é dedo no zero, e
+  // cortar em 48 evita cento e vinte cobranças que alguém terá de apagar à
+  // mão. Mas 1 não é engano de digitação — é "não quero parcelar", e subir
+  // para 2 criaria em silêncio uma cobrança que ninguém pediu.
+  const pedidas = parseInt(obj.parcelas, 10) || 0;
+  const parcelas = Math.min(pedidas, 48);
+  const total = centavos(obj.total);
+  if (pedidas < 2 || total <= 0) return { ok: false, erro: "parcelamento_invalido" };
+
+  const base = Math.floor(total / parcelas);
+  const sobra = total - base * parcelas;
+
+  const grupo = new ObjectId();
+  const primeiro = dataOuHoje(obj.primeiroVencimento);
+  const descricao = String(obj.description || "")
+    .trim()
+    .slice(0, 200);
+  // A FORMA combinada, a mesma de uma cobrança avulsa — *"em parcelamento e
+  // assinatura, faltaram os métodos de pagamento igual em fatura avulsa"*
+  // (19/10/2026). Vazio é "todas", e é o padrão: o carnê abre com pix, boleto
+  // e cartão, e quem escolhe é quem paga.
+  const forma = FORMATO_DA_FORMA.test(String(obj.method || "")) ? String(obj.method) : "";
+
+  const docs = [];
+  for (let i = 0; i < parcelas; i++) {
+    // De mês em mês a partir do primeiro vencimento. `setMonth` resolve o
+    // 31 de janeiro + 1 mês virando 3 de março — e é o comportamento certo:
+    // um carnê que vence dia 31 vence no fim do mês que tiver.
+    const vence = new Date(primeiro);
+    vence.setMonth(vence.getMonth() + i);
+
+    docs.push({
+      student: new ObjectId(studentId),
+      numero: await this.app.api.counter.proximo("charges"),
+      currency: currency || null,
+      createdBy: createdBy ? new ObjectId(createdBy) : null,
+      appointment: null,
+      service: null,
+      aulao: null,
+      recurrence: null,
+      periodo: null,
+      // O GRUPO e a posição. É por eles que a aba monta a lista, e é o que
+      // faz a linha dizer "3/12" em vez de repetir o mesmo nome doze vezes.
+      installment: grupo,
+      parcela: i + 1,
+      parcelas,
+      amount: base + (i === 0 ? sobra : 0),
+      dueDate: vence,
+      description: descricao,
+      method: forma,
+      status: "open",
+      note: String(obj.note || "")
+        .trim()
+        .slice(0, 2000),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  }
+
+  await col.insertMany(docs);
+
+  return {
+    ok: true,
+    grupo: String(grupo),
+    parcelas,
+    // O valor da PARCELA que o gateway vai usar. É a segunda em diante — a
+    // primeira carrega a sobra, e mandar ELA faria o total de lá passar do
+    // combinado.
+    valorDaParcela: base,
+    // A forma sobe junto para quem vai falar com o gateway: é ela que decide
+    // se o carnê sai só em boleto, só em pix, ou aberto nas três.
+    forma,
+    primeira: docs[0],
+    ids: docs.map((d) => d._id).filter(Boolean),
+  };
+};
+
+// Carimba o grupo do gateway em todas as parcelas de uma vez: o webhook de
+// qualquer uma delas chega com o `installment` de lá, e é por ele que se acha
+// a nossa.
+// ── AS MENSALIDADES QUE AINDA NÃO VENCERAM ───────────────────────────────
+//
+// *"se cancelar, cancela no asaas?"* (19/10/2026). Quem cancela uma
+// assinatura quer parar de cobrar — e a geração trabalha com 15 dias de
+// antecedência, então quase sempre existe uma mensalidade já criada, com
+// fatura viva, para um mês que a pessoa não vai usar.
+//
+// SÓ as que ainda não venceram. O mês que já passou e não foi pago é dívida:
+// cancelar a assinatura não a perdoa, e sumir com ela aqui apagaria do
+// "a receber" um dinheiro que a casa tem a receber de verdade.
+Finance_model.prototype.futurasDaRecorrencia = async function (recurrenceId, hoje = new Date()) {
+  if (!ObjectId.isValid(recurrenceId)) return [];
+  const col = await this.charges();
+  return col
+    .find({
+      recurrence: new ObjectId(String(recurrenceId)),
+      status: "open",
+      dueDate: { $gt: hoje },
+    })
+    .toArray();
+};
+
+// ── O CARNÊ INTEIRO: LER, CANCELAR, APAGAR ───────────────────────────────
+//
+// *"coloque a opção de cancelar e deletar parcelamento"* (19/10/2026).
+//
+// O parcelamento não tem documento próprio — ele É o conjunto das parcelas,
+// agrupado por `installment`. Então as três operações são sobre o conjunto, e
+// moram aqui para não virarem três laços escritos no controlador.
+Finance_model.prototype.parcelasDoGrupo = async function (grupo) {
+  if (!ObjectId.isValid(grupo)) return [];
+  const col = await this.charges();
+  return col
+    .find({ installment: new ObjectId(String(grupo)) })
+    .sort({ parcela: 1 })
+    .toArray();
+};
+
+// Cancela as que ainda estão ABERTAS. As pagas ficam como estão: cancelar uma
+// parcela que recebeu dinheiro esconderia o recebimento do extrato, e o
+// dinheiro continuaria no caixa sem linha que o explique.
+Finance_model.prototype.cancelarParcelamento = async function (grupo) {
+  if (!ObjectId.isValid(grupo)) return 0;
+  const col = await this.charges();
+  const r = await col.updateMany(
+    { installment: new ObjectId(String(grupo)), status: "open" },
+    {
+      $set: { status: "canceled", updatedAt: new Date() },
+      // Sem fatura lá fora, os rastros dela aqui são promessas falsas — o
+      // mesmo motivo de `limparNoGateway`, aplicado ao conjunto.
+      $unset: { "gateway.pagamento": "", "gateway.url": "", "gateway.situacao": "" },
+    },
+  );
+  return r.modifiedCount;
+};
+
+Finance_model.prototype.apagarParcelamento = async function (grupo) {
+  if (!ObjectId.isValid(grupo)) return 0;
+  const col = await this.charges();
+  const r = await col.deleteMany({ installment: new ObjectId(String(grupo)) });
+  return r.deletedCount;
+};
+
+Finance_model.prototype.marcarParcelamentoNoGateway = async function (grupo, dados) {
+  const col = await this.charges();
+  await col.updateMany(
+    { installment: new ObjectId(String(grupo)) },
+    { $set: { "gateway.parcelamento": String(dados.id || ""), updatedAt: new Date() } },
+  );
+};
+
+// Carimba, em cada parcela daqui, o id da fatura dela lá.
+//
+// É o que faz o webhook de qualquer uma delas achar a cobrança certa por
+// IDENTIDADE, e não por palpite de vencimento — que deixa de valer no
+// instante em que alguém muda uma data pelo painel do Asaas.
+//
+// Casa pelo VENCIMENTO porque é o único campo que os dois lados têm em comum
+// no momento da criação: as nossas acabaram de nascer com as mesmas datas que
+// mandamos para lá. Depois desta passada, ninguém mais depende disso.
+Finance_model.prototype.casarParcelasComOGateway = async function (grupo, faturas) {
+  const col = await this.charges();
+  const nossas = await col
+    .find({ installment: new ObjectId(String(grupo)) })
+    .sort({ parcela: 1 })
+    .toArray();
+
+  let casadas = 0;
+  for (let i = 0; i < nossas.length; i++) {
+    const fatura = faturas[i];
+    if (!fatura?.id) continue;
+    await col.updateOne(
+      { _id: nossas[i]._id },
+      {
+        $set: {
+          "gateway.pagamento": String(fatura.id),
+          "gateway.url": fatura.link || "",
+          updatedAt: new Date(),
+        },
+      },
+    );
+    casadas++;
+  }
+  return casadas;
+};
+
+// ── A LISTA DE PARCELAMENTOS, por agregação ─────────────────────────────
+//
+// Um grupo é um conjunto de cobranças que compartilham `installment`. O que
+// a aba mostra sai de somá-las: quantas são, quanto é o total, quantas já
+// foram pagas, quando vence a próxima.
+//
+// Contar as PAGAS exige olhar os pagamentos, como a carteira faz: uma
+// parcela está paga quando o que entrou nela cobre o valor dela. `status`
+// sozinho mentiria para quem deu baixa parcial.
+Finance_model.prototype.parcelamentos = async function ({ personId, unit, units } = {}) {
+  const col = await this.charges();
+  const instancia = instanceContext.current();
+
+  const donos = recorteDeIds(personId);
+
+  const [saida] = await col
+    .aggregate([
+      { $match: { installment: { $ne: null }, ...(donos ? { student: { $in: donos } } : {}) } },
+      {
+        $lookup: {
+          from: "payments",
+          let: { cobranca: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ["$charge", "$$cobranca"] },
+                ...(instancia ? { instance: instancia } : {}),
+                ...statusDePagamento.filtroDeEntrada(),
+              },
+            },
+            { $group: { _id: null, total: { $sum: "$amount" } } },
+          ],
+          as: "recebimentos",
+        },
+      },
+      {
+        $lookup: {
+          from: "users",
+          let: { pessoa: "$student" },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ["$_id", "$$pessoa"] },
+                ...(instancia ? { instance: instancia } : {}),
+              },
+            },
+            { $project: { name: 1, avatarAt: 1, unit: 1 } },
+          ],
+          as: "pessoa",
+        },
+      },
+      {
+        $addFields: {
+          pago: { $ifNull: [{ $arrayElemAt: ["$recebimentos.total", 0] }, 0] },
+          studentName: { $ifNull: [{ $arrayElemAt: ["$pessoa.name", 0] }, ""] },
+          studentAvatarAt: { $ifNull: [{ $arrayElemAt: ["$pessoa.avatarAt", 0] }, null] },
+          studentUnit: { $ifNull: [{ $arrayElemAt: ["$pessoa.unit", 0] }, null] },
+        },
+      },
+      ...(ObjectId.isValid(unit)
+        ? [{ $match: { studentUnit: new ObjectId(unit) } }]
+        : lenteDeUnidade.filtroDeUnidades(units)
+          ? [
+              {
+                $match: {
+                  $or: [
+                    { studentUnit: lenteDeUnidade.filtroDeUnidades(units).$or[0].unit },
+                    { studentUnit: null },
+                  ],
+                },
+              },
+            ]
+          : []),
+      {
+        $group: {
+          _id: "$installment",
+          student: { $first: "$student" },
+          studentName: { $first: "$studentName" },
+          studentAvatarAt: { $first: "$studentAvatarAt" },
+          studentUnit: { $first: "$studentUnit" },
+          description: { $first: "$description" },
+          currency: { $first: "$currency" },
+          parcelas: { $max: "$parcelas" },
+          total: { $sum: { $ifNull: ["$amount", 0] } },
+          recebido: { $sum: "$pago" },
+          // QUITADAS, e não "com status pago": baixa parcial deixaria a
+          // conta mentindo para mais.
+          quitadas: {
+            $sum: { $cond: [{ $gte: ["$pago", { $ifNull: ["$amount", 0] }] }, 1, 0] },
+          },
+          canceladas: { $sum: { $cond: [{ $eq: ["$status", "canceled"] }, 1, 0] } },
+          primeiro: { $min: "$dueDate" },
+          ultimo: { $max: "$dueDate" },
+          // A PRÓXIMA a vencer entre as que ainda devem. Vazio quando acabou
+          // de pagar — e aí a tela diz "quitado" em vez de uma data no
+          // passado.
+          proximo: {
+            $min: {
+              $cond: [
+                {
+                  $and: [
+                    { $ne: ["$status", "canceled"] },
+                    { $lt: ["$pago", { $ifNull: ["$amount", 0] }] },
+                  ],
+                },
+                "$dueDate",
+                null,
+              ],
+            },
+          },
+          noGateway: { $first: "$gateway.parcelamento" },
+        },
+      },
+      {
+        $facet: {
+          rows: [
+            { $sort: { primeiro: -1, _id: 1 } },
+            {
+              $project: {
+                _id: 0,
+                id: { $toString: "$_id" },
+                student: { $toString: "$student" },
+                studentName: 1,
+                studentAvatarAt: 1,
+                studentUnit: { $toString: "$studentUnit" },
+                description: 1,
+                currency: 1,
+                parcelas: 1,
+                total: 1,
+                recebido: 1,
+                quitadas: 1,
+                canceladas: 1,
+                primeiro: 1,
+                ultimo: 1,
+                proximo: 1,
+                noGateway: { $ifNull: ["$noGateway", ""] },
+              },
+            },
+          ],
+          resumo: [
+            {
+              $group: {
+                _id: null,
+                total: { $sum: "$total" },
+                recebido: { $sum: "$recebido" },
+                grupos: { $sum: 1 },
+              },
+            },
+          ],
+        },
+      },
+    ])
+    .toArray();
+
+  const resumo = saida?.resumo?.[0] || {};
+  return {
+    rows: saida?.rows || [],
+    total: (saida?.rows || []).length,
+    resumo: {
+      total: resumo.total || 0,
+      recebido: resumo.recebido || 0,
+      aReceber: Math.max(0, (resumo.total || 0) - (resumo.recebido || 0)),
+      grupos: resumo.grupos || 0,
+    },
+  };
+};
+
 // ── EDITAR É MUDAR O QUE VEIO, NÃO REESCREVER TUDO ────────────────────────
 //
 // `limparCobranca` monta o documento INTEIRO a partir do que recebe, com padrão
@@ -231,9 +627,18 @@ Finance_model.prototype.insertCharge = async function (studentId, obj, createdBy
 const CAMPOS_DA_COBRANCA = {
   amount: (v) => centavos(v),
   dueDate: (v) => dataOuHoje(v),
-  description: (v) => String(v || "").trim().slice(0, 200),
+  description: (v) =>
+    String(v || "")
+      .trim()
+      .slice(0, 200),
   status: (v) => (STATUS.includes(v) ? v : "open"),
-  note: (v) => String(v || "").trim().slice(0, 2000),
+  note: (v) =>
+    String(v || "")
+      .trim()
+      .slice(0, 2000),
+  // Vazio é "todas as formas", e é um valor legítimo: quem limpa o campo
+  // está dizendo "deixa o aluno escolher".
+  method: (v) => (FORMATO_DA_FORMA.test(String(v || "")) ? String(v) : ""),
 };
 
 Finance_model.prototype.updateCharge = async function (id, obj) {
@@ -257,6 +662,35 @@ Finance_model.prototype.deleteCharge = async function (id) {
   if (!ObjectId.isValid(id)) return false;
   const col = await this.charges();
 
+  // ── APAGAR UMA PARCELA DA ASSINATURA TEM DE FICAR APAGADO ──────────────
+  //
+  // *"tentei excluir o pagamento que pertence a assinatura, ele falou que
+  // apagou mas continua"* (17/10/2026).
+  //
+  // E ele apagou mesmo — a mensagem não mentia. O que acontecia é que a
+  // geração roda a cada LEITURA da tela do dinheiro (não há agendador aqui;
+  // ver `Recurrence_model.gerar`), e ela decide o que falta comparando os
+  // períodos que já existem. Apagado o de setembro, setembro voltava a
+  // "faltar" — e nascia de novo antes de a tela terminar de carregar.
+  //
+  // Da cadeira de quem olha, o botão simplesmente não funciona. É o pior
+  // tipo de defeito: a confirmação diz que deu certo.
+  //
+  // A LÁPIDE resolve: o período apagado fica anotado na regra, e a geração
+  // passa a tratá-lo como já resolvido. Apagar volta a querer dizer apagar.
+  //
+  // Por que na REGRA e não um `deletedAt` na cobrança: um documento apagado
+  // que continua no banco obriga TODA consulta de dinheiro a lembrar de
+  // excluí-lo, e a primeira que esquecer mostra uma cobrança fantasma no
+  // extrato de alguém. A lápide é um dado da regra, e só a geração a lê.
+  const cobranca = await col.findOne(
+    { _id: new ObjectId(id) },
+    { projection: { recurrence: 1, periodo: 1 } },
+  );
+  if (cobranca?.recurrence && cobranca.periodo) {
+    await this.app.api.recurrence.naoGerarMais(String(cobranca.recurrence), cobranca.periodo);
+  }
+
   // Os pagamentos ligados a ela viram avulsos em vez de sumirem: o dinheiro
   // entrou de verdade, e apagar a cobrança não desfaz isso.
   const pagamentos = await this.payments();
@@ -270,6 +704,82 @@ Finance_model.prototype.deleteCharge = async function (id) {
 //
 // É o que torna a geração automática segura de repetir: remarcar ou salvar o
 // mesmo compromisso de novo não cria uma segunda cobrança.
+// ── A COBRANÇA DE CADA COMPROMISSO, JÁ COM "PAGO OU NÃO" ─────────────────
+//
+// *"depois aparece ali na frente se foi pago ou não"* (16/11/2026) — na lista
+// de compromissos da agenda, ao lado de cada atendimento.
+//
+// Pago, falta e atrasada NÃO são calculados aqui à mão: vêm de
+// `estagiosDaCobranca`, a definição única que a carteira e o gráfico usam. Uma
+// terceira cópia da regra seria a agenda dizendo "pago" para a cobrança que o
+// financeiro, na tela ao lado, chama de atrasada.
+//
+// Uma consulta para a lista inteira (não uma por linha), e só das cobranças
+// ligadas aos compromissos pedidos. Devolve { idDoCompromisso: resumo }.
+function situacaoDaCobranca(c) {
+  if (c.status === "canceled") return "cancelada";
+  if ((c.falta || 0) <= 0) return "paga";
+  if (c.atrasada) return "atrasada";
+  return "aberta";
+}
+
+Finance_model.prototype.cobrancasDosCompromissos = async function (appointmentIds, agora = new Date()) {
+  const validos = [...new Set((appointmentIds || []).map(String))]
+    .filter((id) => ObjectId.isValid(id))
+    .map((id) => new ObjectId(id));
+  if (!validos.length) return {};
+
+  const col = await this.charges();
+  const { juntarPagamentos, derivados, contas, atraso } = estagiosDaCobranca({
+    instancia: instanceContext.current(),
+    agora,
+  });
+
+  const docs = await col
+    .aggregate([
+      { $match: { appointment: { $in: validos } } },
+      juntarPagamentos,
+      derivados,
+      contas,
+      atraso,
+      {
+        $project: {
+          appointment: 1,
+          amount: 1,
+          currency: 1,
+          status: 1,
+          dueDate: 1,
+          pago: 1,
+          falta: 1,
+          atrasada: 1,
+          "gateway.url": 1,
+          "gateway.pagamento": 1,
+        },
+      },
+    ])
+    .toArray();
+
+  const porCompromisso = {};
+  for (const c of docs) {
+    const chave = String(c.appointment);
+    // Se houver mais de uma (não devia: `chargeOfAppointment` guarda isso), a
+    // que vale é a que não foi cancelada.
+    if (porCompromisso[chave] && c.status === "canceled") continue;
+    porCompromisso[chave] = {
+      _id: c._id,
+      amount: c.amount || 0,
+      currency: c.currency || "",
+      pago: c.pago || 0,
+      falta: c.falta || 0,
+      dueDate: c.dueDate || null,
+      situacao: situacaoDaCobranca(c),
+      link: c.gateway?.url || "",
+      noGateway: Boolean(c.gateway?.pagamento),
+    };
+  }
+  return porCompromisso;
+};
+
 Finance_model.prototype.chargeOfAppointment = async function (appointmentId) {
   if (!ObjectId.isValid(appointmentId)) return undefined;
   const col = await this.charges();
@@ -287,7 +797,8 @@ Finance_model.prototype.chargeOfAulao = async function (aulaoId, studentId) {
   if (!ObjectId.isValid(aulaoId) || !ObjectId.isValid(studentId)) return undefined;
   const col = await this.charges();
   return (
-    (await col.findOne({ aulao: new ObjectId(aulaoId), student: new ObjectId(studentId) })) || undefined
+    (await col.findOne({ aulao: new ObjectId(aulaoId), student: new ObjectId(studentId) })) ||
+    undefined
   );
 };
 
@@ -365,6 +876,9 @@ const ORDEM_DA_CARTEIRA = {
   // Ordenar por número é ordenar por ordem de criação, e com um valor que a
   // pessoa pode conferir — é o que ninguém consegue fazer por `createdAt`.
   numero: "numero",
+  // Quanto ENTROU nesta linha. É a ordem da janela do "Recebido" do painel:
+  // quem pagou mais primeiro.
+  pago: "pago",
   person: "studentName",
   description: "description",
   dueDate: "dueDate",
@@ -378,6 +892,9 @@ const ORDEM_DA_CARTEIRA = {
 // escolher por qual chave o banco trabalha.
 const ORDEM_DOS_RECEBIMENTOS = {
   numero: "numero",
+  // Quanto ENTROU nesta linha. É a ordem da janela do "Recebido" do painel:
+  // quem pagou mais primeiro.
+  pago: "pago",
   person: "studentName",
   description: "assunto",
   date: "date",
@@ -391,82 +908,122 @@ const ORDEM_DOS_RECEBIMENTOS = {
 const LIMITE_MAXIMO = 200;
 const LIMITE_PADRAO = 25;
 
-// A CARTEIRA — a lista do Financeiro geral, uma PÁGINA por vez.
+// ── OS AVULSOS, COMO LINHAS DA CARTEIRA ──────────────────────────────────
 //
-// ── Por que agregação, e não `find().sort().skip().limit()` ─────────────
+// Um pagamento AVULSO é um que nasceu pago: sem cobrança do outro lado, sem
+// vencimento, sem falta. Ele entra na carteira como linha, e é isso que permite
+// UMA lista — antes ele não tinha onde aparecer, e dinheiro que entrou e não
+// está em lugar nenhum é o pior buraco de relatório que existe.
 //
-// Porque quase nada do que esta tela mostra é campo da cobrança. `pago` é a soma
-// dos pagamentos dela, `falta` é a diferença, `atrasada` é o relógio comparado
-// com o vencimento, e o NOME da pessoa mora em outra collection. Ordenar ou
-// filtrar por qualquer um deles exige que eles existam antes do `$sort` — daí os
-// dois `$lookup` e o `$addFields`.
-//
-// ── UMA IDA AO BANCO, três respostas ────────────────────────────────────
-//
-// `$facet` separa o que cada uma enxerga, e a separação É a regra de negócio:
-//
-//   resumo   a JANELA INTEIRA, sem recorte nenhum — "como está o mês"
-//   rows     a página, depois do recorte e da busca
-//   total    quantas linhas o recorte tem, para a tela saber quantas páginas
-//
-// O resumo ignorar o recorte não é descuido: *"cada vez que eu troco de aba, os
-// valores ali em cima mudam"*. A pergunta dos cartões é sobre o mês, não sobre a
-// parte da lista que alguém resolveu ver.
-Finance_model.prototype.carteira = async function ({
-  de,
-  ate,
-  status,
-  busca,
-  fuso,
-  ordem,
-  direcao,
-  pagina,
-  limite,
-  // A unidade escolhida no alto da tela. Vazia é "todas".
-  unit,
-  // A cerca de unidades de quem pergunta (26/09/2026).
-  units,
-  // ── AS COBRANÇAS ESCOLHIDAS À MÃO ───────────────────────────────────────
-  //
-  // Uma lista de ids. Quando ela vem, é ELA que manda: a janela, o estado e a
-  // busca continuam valendo (é o mesmo pipeline), mas o conjunto já está
-  // decidido por quem marcou as caixas na tela.
-  //
-  // Existe para a FOLHA IMPRESSA das cobranças marcadas — ela abre por link,
-  // sem a tela atrás, e precisa buscar de novo exatamente aquelas linhas.
-  ids,
-  // ── AS COBRANÇAS DE UMA PESSOA SÓ ───────────────────────────────────────
-  //
-  // O extrato da ficha. Recortar DEPOIS da busca (filtrando as linhas que
-  // voltaram) daria certo na conta pequena e erraria calado na grande: o teto
-  // da exportação é de cinco mil, e a pessoa de número cinco mil e um sairia
-  // com o extrato vazio.
-  personId,
-  // Só de dentro do servidor — ver `lib/tetoDaLista.js`.
-  exportando,
-} = {}) {
-  const charges = await this.charges();
-
-  const janela = {};
-  // A janela é sobre o VENCIMENTO, não sobre quando a cobrança foi criada: o
-  // relatório do mês é o do que vence no mês.
+// Mora aqui fora pela mesma razão de `estagiosDaCobranca`: a série mensal do
+// painel precisa do mesmo conjunto. Deixá-lo de fora da série faria o gráfico
+// do "recebido" ser SEMPRE menor que o número em cima dele, numa conta que
+// recebe avulso — e a diferença seria invisível até alguém somar à mão.
+function uniaoDeAvulsos({ instancia, juntarPessoa, comAvulsos, de, ate, fuso }) {
+  const janelaDoAvulso = {};
   if (de || ate) {
-    janela.dueDate = {};
-    // O DIA inteiro, e no fuso da conta — ver o cabeçalho de `inicioDoDia`.
-    if (de) janela.dueDate.$gte = inicioDoDia(de, fuso);
-    if (ate) janela.dueDate.$lte = fimDoDia(ate, fuso);
+    janelaDoAvulso.date = {};
+    if (de) janelaDoAvulso.date.$gte = inicioDoDia(de, fuso);
+    if (ate) janelaDoAvulso.date.$lte = fimDoDia(ate, fuso);
   }
 
-  const agora = new Date();
+  // O estado do pagamento traduzido para a escala da cobrança, que é a da
+  // coluna Situação. `pending` é dinheiro prometido — vira "aberto", com falta
+  // igual ao valor. `refunded` e `canceled` não são receita, e o mais próximo
+  // que a cobrança tem é "cancelado". O estado verdadeiro viaja ao lado, em
+  // `avulsoStatus`, para a tela não chamar reembolso de cancelamento.
+  //
+  // `$ifNull` com "paid": pagamento anterior ao campo não o tem, e ausente
+  // significa pago — ver `lib/statusDePagamento.js`.
+  const estadoDoAvulso = { $ifNull: ["$status", "paid"] };
 
+  const unirAvulsos = comAvulsos
+    ? [
+        {
+          $unionWith: {
+            coll: "payments",
+            pipeline: [
+              {
+                $match: {
+                  ...(instancia ? { instance: instancia } : {}),
+                  // SEM cobrança do outro lado: é o que faz dele avulso.
+                  $or: [{ charge: null }, { charge: { $exists: false } }],
+                  ...janelaDoAvulso,
+                },
+              },
+              juntarPessoa,
+              {
+                $addFields: {
+                  avulso: true,
+                  avulsoStatus: estadoDoAvulso,
+                  // Sem número: o contador de cobranças não passa por aqui, e
+                  // inventar um faria dois lançamentos diferentes com o mesmo.
+                  numero: null,
+                  description: { $ifNull: ["$note", ""] },
+                  amount: { $ifNull: ["$amount", 0] },
+                  dueDate: "$date",
+                  status: {
+                    $switch: {
+                      branches: [
+                        {
+                          case: { $in: [estadoDoAvulso, ["refunded", "canceled"]] },
+                          then: "canceled",
+                        },
+                        { case: { $eq: [estadoDoAvulso, "pending"] }, then: "open" },
+                      ],
+                      default: "paid",
+                    },
+                  },
+                  pago: {
+                    $cond: [
+                      { $in: [estadoDoAvulso, ["refunded", "canceled", "pending"]] },
+                      0,
+                      { $ifNull: ["$amount", 0] },
+                    ],
+                  },
+                  studentName: { $ifNull: [{ $arrayElemAt: ["$pessoa.name", 0] }, ""] },
+                  studentEmail: { $ifNull: [{ $arrayElemAt: ["$pessoa.email", 0] }, ""] },
+                  studentPhone: { $ifNull: [{ $arrayElemAt: ["$pessoa.phone", 0] }, ""] },
+                  studentAvatarAt: { $ifNull: [{ $arrayElemAt: ["$pessoa.avatarAt", 0] }, null] },
+                  studentUnit: { $ifNull: [{ $arrayElemAt: ["$pessoa.unit", 0] }, null] },
+                },
+              },
+            ],
+          },
+        },
+      ]
+    : [];
+
+  return unirAvulsos;
+}
+
+// ── OS ESTÁGIOS QUE DEFINEM UMA COBRANÇA ─────────────────────────────────
+//
+// Pago, falta, atrasada, a unidade de quem deve. Eles eram escritos à mão
+// dentro de `carteira` — e quando o painel ganhou GRÁFICO (22/10/2026) passou a
+// existir um segundo leitor da mesma verdade: a série dos últimos doze meses.
+//
+// Duas cópias desta pipeline é o defeito mais caro que este arquivo poderia ter.
+// "Atrasada" não é um campo gravado — é `status open` E `falta > 0` E
+// `dueDate < agora` —, e no dia em que uma das cópias ganhasse uma condição a
+// mais, o cartão diria R$ 124.908 e o gráfico embaixo dele terminaria em outro
+// número. Ninguém desconfia de um total; e dois totais que discordam na mesma
+// tela destroem a confiança nos dois.
+//
+// Então a definição é UMA, e quem precisa dela pede por aqui.
+//
+// `agora` entra por parâmetro e não é lido aqui dentro: a série e a carteira
+// têm de olhar para o MESMO instante, senão a última barra do gráfico pode
+// nascer de um "agora" alguns milissegundos à frente do número do cartão — e é
+// exatamente numa virada de vencimento que isso apareceria.
+function estagiosDaCobranca({ instancia, agora }) {
   // ── AS DUAS JUNÇÕES ────────────────────────────────────────────────────
   //
-  // O `instance` DENTRO da sub-pipeline é desempenho, não correção: `lib/escopo.js`
-  // não alcança o interior de um `$lookup`, e a correção já está garantida porque
-  // as duas casam por ObjectId, que é único global. Sem ele, cada junção varreria
-  // os pagamentos e as pessoas de todos os clientes para achar as de um.
-  const instancia = instanceContext.current();
-
+  // O `instance` DENTRO da sub-pipeline é desempenho, não correção:
+  // `lib/escopo.js` não alcança o interior de um `$lookup`, e a correção já
+  // está garantida porque as duas casam por ObjectId, que é único global. Sem
+  // ele, cada junção varreria os pagamentos e as pessoas de todos os clientes
+  // para achar as de um.
   const juntarPagamentos = {
     $lookup: {
       from: "payments",
@@ -535,6 +1092,10 @@ Finance_model.prototype.carteira = async function ({
       origem: {
         $switch: {
           branches: [
+            // O avulso PRIMEIRO: ele não tem nenhum dos três vínculos, e sem
+            // este ramo cairia no padrão "manual" — que é outra coisa (uma
+            // cobrança escrita à mão, que tem vencimento).
+            { case: { $ifNull: ["$avulso", false] }, then: "avulso" },
             { case: { $ifNull: ["$appointment", false] }, then: "appointment" },
             { case: { $ifNull: ["$aulao", false] }, then: "aulao" },
             { case: { $ifNull: ["$recurrence", false] }, then: "recurrence" },
@@ -572,6 +1133,181 @@ Finance_model.prototype.carteira = async function ({
       },
     },
   };
+
+  return { juntarPagamentos, juntarPessoa, derivados, contas, atraso };
+}
+
+// A CARTEIRA — a lista do Financeiro geral, uma PÁGINA por vez.
+//
+// ── Por que agregação, e não `find().sort().skip().limit()` ─────────────
+//
+// Porque quase nada do que esta tela mostra é campo da cobrança. `pago` é a soma
+// dos pagamentos dela, `falta` é a diferença, `atrasada` é o relógio comparado
+// com o vencimento, e o NOME da pessoa mora em outra collection. Ordenar ou
+// filtrar por qualquer um deles exige que eles existam antes do `$sort` — daí os
+// dois `$lookup` e o `$addFields`.
+//
+// ── UMA IDA AO BANCO, três respostas ────────────────────────────────────
+//
+// `$facet` separa o que cada uma enxerga, e a separação É a regra de negócio:
+//
+//   resumo   a JANELA INTEIRA, sem recorte nenhum — "como está o mês"
+//   rows     a página, depois do recorte e da busca
+//   total    quantas linhas o recorte tem, para a tela saber quantas páginas
+//
+// O resumo ignorar o recorte não é descuido: *"cada vez que eu troco de aba, os
+// valores ali em cima mudam"*. A pergunta dos cartões é sobre o mês, não sobre a
+// parte da lista que alguém resolveu ver.
+// ── A SÉRIE MENSAL DO PAINEL (22/10/2026) ────────────────────────────────
+//
+// *"cadê os gráficos? veja a riqueza de detalhes que é no SprintHub"*.
+//
+// Os mesmos três números do cartão — recebido, a receber, atrasado — mês a mês.
+// Ela não é um relatório novo: é a MESMA pipeline da carteira com um `$group`
+// no lugar do `$facet`, e isso é a coisa mais importante deste bloco.
+//
+// ── O MÊS SAI DO VENCIMENTO, E TINHA DE SAIR ─────────────────────────────
+//
+// "Recebido em outubro" aqui quer dizer *o que entrou contra o que vencia em
+// outubro*, e não *o dinheiro que caiu na conta em outubro*. É a definição que
+// o cartão já usava (a janela da carteira é sobre `dueDate`), e trocá-la na
+// série faria o último ponto do gráfico discordar do número desenhado em cima
+// dele. Duas respostas para a mesma pergunta, a dez pixels de distância.
+//
+// ── O FUSO ENTRA AQUI, E NO PAYABLE NÃO ──────────────────────────────────
+//
+// `dueDate` de uma COBRANÇA é um instante de verdade: a do compromisso herda a
+// hora do atendimento. Então o mês dela é o mês no fuso da casa, e sem o
+// `timezone` a cobrança de 31/10 às 22h cairia em novembro.
+//
+// Em `Payable` é o contrário, e lá o comentário explica: a conta a pagar é
+// gravada como meia-noite UTC do dia do calendário, e aplicar o fuso a ela
+// EMPURRARIA tudo que vence no dia 1º para o mês anterior.
+Finance_model.prototype.serieMensal = async function ({ de, ate, fuso, unit, units } = {}) {
+  const charges = await this.charges();
+
+  const agora = new Date();
+  const instancia = instanceContext.current();
+  const { juntarPagamentos, juntarPessoa, derivados, contas, atraso } = estagiosDaCobranca({
+    instancia,
+    agora,
+  });
+
+  const lente = ObjectId.isValid(unit) ? new ObjectId(String(unit)) : null;
+  const cerca = lente ? null : lenteDeUnidade.filtroDeUnidades(units);
+  const etapaDaCerca = cerca
+    ? [{ $match: { $or: [{ studentUnit: cerca.$or[0].unit }, { studentUnit: null }] } }]
+    : [];
+
+  const linhas = await charges
+    .aggregate(
+      [
+        { $match: { dueDate: { $gte: inicioDoDia(de, fuso), $lte: fimDoDia(ate, fuso) } } },
+        juntarPagamentos,
+        juntarPessoa,
+        derivados,
+        ...uniaoDeAvulsos({ instancia, juntarPessoa, comAvulsos: true, de, ate, fuso }),
+        ...(lente ? [{ $match: { studentUnit: lente } }] : etapaDaCerca),
+        contas,
+        atraso,
+        {
+          $group: {
+            _id: { $dateToString: { format: "%Y-%m", date: "$dueDate", timezone: fuso } },
+            recebido: { $sum: "$pago" },
+            aReceber: { $sum: { $cond: [{ $eq: ["$status", "open"] }, "$falta", 0] } },
+            atrasado: { $sum: { $cond: ["$atrasada", "$falta", 0] } },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ],
+      { allowDiskUse: true },
+    )
+    .toArray();
+
+  return linhas.map((l) => ({
+    r: l._id,
+    recebido: l.recebido || 0,
+    aReceber: l.aReceber || 0,
+    atrasado: l.atrasado || 0,
+  }));
+};
+
+Finance_model.prototype.carteira = async function ({
+  de,
+  ate,
+  status,
+  busca,
+  fuso,
+  ordem,
+  direcao,
+  pagina,
+  limite,
+  // A unidade escolhida no alto da tela. Vazia é "todas".
+  unit,
+  // A cerca de unidades de quem pergunta (26/09/2026).
+  units,
+  // ── AS COBRANÇAS ESCOLHIDAS À MÃO ───────────────────────────────────────
+  //
+  // Uma lista de ids. Quando ela vem, é ELA que manda: a janela, o estado e a
+  // busca continuam valendo (é o mesmo pipeline), mas o conjunto já está
+  // decidido por quem marcou as caixas na tela.
+  //
+  // Existe para a FOLHA IMPRESSA das cobranças marcadas — ela abre por link,
+  // sem a tela atrás, e precisa buscar de novo exatamente aquelas linhas.
+  ids,
+  // ── AS COBRANÇAS DE UMA PESSOA SÓ ───────────────────────────────────────
+  //
+  // O extrato da ficha. Recortar DEPOIS da busca (filtrando as linhas que
+  // voltaram) daria certo na conta pequena e erraria calado na grande: o teto
+  // da exportação é de cinco mil, e a pessoa de número cinco mil e um sairia
+  // com o extrato vazio.
+  personId,
+  // Só de dentro do servidor — ver `lib/tetoDaLista.js`.
+  exportando,
+  // ── OS AVULSOS NA MESMA LISTA ──────────────────────────────────────────
+  //
+  // *"até hoje acho isso confuso... deixe só pagamento no sistema inteiro"*
+  // (17/10/2026). A tela deixou de ter duas abas com dois substantivos; o
+  // comentário logo acima de `recebimentos` explicava por que eram duas
+  // consultas, e esta opção é a resposta à pergunta que ele fez depois.
+  //
+  // Um pagamento AVULSO é um pagamento que nasceu pago: sem cobrança do outro
+  // lado, sem vencimento, sem falta. Ele entra aqui como linha, e é isso que
+  // permite UMA lista — antes ele não tinha onde aparecer, e dinheiro que
+  // entrou e não está em lugar nenhum é o pior buraco de relatório que existe.
+  comAvulsos,
+  // ── SÓ AS QUE RECEBERAM ALGUMA COISA (22/10/2026) ──────────────────────
+  //
+  // Para a janela que lista o que está POR TRÁS do "Recebido" do painel.
+  //
+  // `status: "paid"` não serve: ele quer dizer "falta zero", e uma cobrança de
+  // R$ 500 com R$ 200 pagos entra no recebido do mês e NÃO é `paid`. Listar por
+  // ele mostraria uma lista cuja soma é menor que o número no topo dela — a
+  // pior espécie de relatório.
+  //
+  // A conta do painel é `$sum: "$pago"`; o conjunto dela é exatamente este.
+  somentePagas,
+} = {}) {
+  const charges = await this.charges();
+
+  const janela = {};
+  // A janela é sobre o VENCIMENTO, não sobre quando a cobrança foi criada: o
+  // relatório do mês é o do que vence no mês.
+  if (de || ate) {
+    janela.dueDate = {};
+    // O DIA inteiro, e no fuso da conta — ver o cabeçalho de `inicioDoDia`.
+    if (de) janela.dueDate.$gte = inicioDoDia(de, fuso);
+    if (ate) janela.dueDate.$lte = fimDoDia(ate, fuso);
+  }
+
+  const agora = new Date();
+
+  // Pago, falta, atrasada e a unidade de quem deve — a definição única, que a
+  // série mensal do painel lê pelo mesmo caminho. Ver `estagiosDaCobranca`.
+  const { juntarPagamentos, juntarPessoa, derivados, contas, atraso } = estagiosDaCobranca({
+    instancia: instanceContext.current(),
+    agora,
+  });
 
   // O POSTO da situação, para ordenar por ela. Mesma escala que a tela usava.
   const posto = {
@@ -613,6 +1349,8 @@ Finance_model.prototype.carteira = async function ({
   // pessoa sair com o dinheiro de todo mundo — e a folha parece certa.
   const donos = recorteDeIds(personId);
   if (donos) recorte.push({ $match: { student: { $in: donos } } });
+
+  if (somentePagas) recorte.push({ $match: { pago: { $gt: 0 } } });
 
   const pedidos = statusDeCobranca.pedidos(status);
   if (pedidos.size) {
@@ -679,8 +1417,69 @@ Finance_model.prototype.carteira = async function ({
       studentPhone: 1,
       studentAvatarAt: 1,
       studentUnit: { $toString: "$studentUnit" },
+      // A linha é um avulso? A tela desenha o vencimento e a falta de outro
+      // jeito — num avulso eles não existem.
+      avulso: { $ifNull: ["$avulso", false] },
+      // E a posição no carnê, quando ela faz parte de um: é o que faz a
+      // linha dizer "3/12" em vez de repetir o mesmo nome doze vezes.
+      parcela: { $ifNull: ["$parcela", null] },
+      parcelas: { $ifNull: ["$parcelas", null] },
+      // DE QUAL ASSINATURA ela nasceu. A tela usa isto para a janela "as
+      // cobranças desta assinatura" (*"bote um botão para ver as faturas da
+      // assinatura"*, 19/10/2026): sem o vínculo, a aba de assinaturas não
+      // teria como dizer QUAIS das cobranças ao lado são dela.
+      recurrence: {
+        $cond: [{ $ifNull: ["$recurrence", false] }, { $toString: "$recurrence" }, null],
+      },
+      // E o estado VERDADEIRO dele. Um reembolso vira `canceled` na coluna de
+      // situação da cobrança porque é o estado mais próximo que existe lá, e
+      // mostrar "Cancelado" para dinheiro que foi devolvido é uma conversa com
+      // o cliente que ninguém quer ter.
+      avulsoStatus: { $ifNull: ["$avulsoStatus", null] },
+      // ── O QUE O GATEWAY SABE DESTA COBRANÇA ─────────────────────────
+      //
+      // `url` é o link da fatura, e só existe em quem foi gerada lá: é o que
+      // se reenvia quando pedem a segunda via, sem abrir o painel deles.
+      // `situacao` é o que está acontecendo com ela — autorizada, em
+      // análise, estornando —, e a tela já sabia pintá-la na ficha.
+      //
+      // Strings vazias e não ausentes: o avulso vem do `$unionWith` e não
+      // tem o campo, e um objeto que às vezes existe obrigaria cada leitor a
+      // lembrar disso.
+      gateway: {
+        url: { $ifNull: ["$gateway.url", ""] },
+        situacao: { $ifNull: ["$gateway.situacao", ""] },
+        // O id da fatura lá. A tela não o mostra: ele responde "já foi
+        // gerada?", que é o que decide se o menu oferece gerar — e gerar de
+        // novo abriria um segundo boleto do mesmo dinheiro.
+        pagamento: { $ifNull: ["$gateway.pagamento", ""] },
+      },
     },
   };
+
+  // ── OS AVULSOS, COMO LINHAS DESTA LISTA ────────────────────────────────
+  //
+  // `$unionWith` e não uma segunda consulta: paginar e ordenar DOIS resultados
+  // no navegador não funciona — a página 2 de uma lista costurada de duas
+  // fontes não é a página 2 de nada.
+  //
+  // Ele entra depois de `derivados`, onde o lado das cobranças já tem `pago` e
+  // os campos da pessoa, e ANTES do `$facet`: é o que faz os cartões do topo e
+  // a lista falarem do mesmo conjunto.
+  //
+  // A JANELA do avulso é a data DELE. Para a cobrança a janela é o vencimento;
+  // o avulso não tem um, e a única data que ele tem é a do dinheiro entrando.
+  // Gravá-la em `dueDate` é o que faz uma ordenação só servir aos dois.
+  // Os avulsos como linhas desta lista. Ver `uniaoDeAvulsos` — a série mensal
+  // do painel soma exatamente o mesmo conjunto.
+  const unirAvulsos = uniaoDeAvulsos({
+    instancia: instanceContext.current(),
+    juntarPessoa,
+    comAvulsos,
+    de,
+    ate,
+    fuso,
+  });
 
   // A unidade escolhida no alto da tela. Id inválido é ignorado — um id sujo
   // na URL não pode esvaziar o financeiro de ninguém.
@@ -701,6 +1500,11 @@ Finance_model.prototype.carteira = async function ({
         juntarPagamentos,
         juntarPessoa,
         derivados,
+        // Os avulsos entram aqui: o lado das cobranças já tem `pago` e os
+        // campos da pessoa, e o que vem do `$unionWith` chega com os mesmos
+        // nomes. Daqui para baixo o pipeline não sabe mais quem é quem — e é
+        // exatamente isso que faz a lista ser UMA.
+        ...unirAvulsos,
         // ── A LENTE DA UNIDADE ────────────────────────────────────────────
         //
         // *"o financeiro ainda puxa tudo"*. Ela entra DEPOIS da junção com a
@@ -750,7 +1554,7 @@ Finance_model.prototype.carteira = async function ({
       ],
       // Collation do banco em vez de `localeCompare` no navegador: é ela que faz
       // "Ávila" cair perto de "Avila", e não depois de "Zanetti".
-      { collation: { locale: "pt", strength: 1 } }
+      { collation: { locale: "pt", strength: 1 } },
     )
     .toArray();
 
@@ -969,7 +1773,9 @@ Finance_model.prototype.recebimentos = async function ({
       studentEmail: 1,
       studentPhone: 1,
       studentAvatarAt: 1,
-      studentUnit: { $cond: [{ $ifNull: ["$studentUnit", false] }, { $toString: "$studentUnit" }, null] },
+      studentUnit: {
+        $cond: [{ $ifNull: ["$studentUnit", false] }, { $toString: "$studentUnit" }, null],
+      },
     },
   };
 
@@ -1143,10 +1949,9 @@ Finance_model.prototype.paymentData = async function (id) {
 // de quitar em uma moeda uma dívida em outra.
 Finance_model.prototype.moedaDaCobranca = async function (chargeId) {
   if (!ObjectId.isValid(chargeId)) return null;
-  const doc = await (await this.charges()).findOne(
-    { _id: new ObjectId(chargeId) },
-    { projection: { currency: 1 } }
-  );
+  const doc = await (
+    await this.charges()
+  ).findOne({ _id: new ObjectId(chargeId) }, { projection: { currency: 1 } });
   return doc?.currency || null;
 };
 
@@ -1288,7 +2093,7 @@ Finance_model.prototype.saveReceipt = async function (paymentId, anexo) {
         updatedAt: new Date(),
       },
     },
-    { upsert: true }
+    { upsert: true },
   );
 
   const col = await this.payments();
@@ -1401,6 +2206,7 @@ Finance_model.prototype.deleteAllOfStudent = async function (studentId) {
 module.exports = Finance_model;
 module.exports.FORMAS = FORMAS;
 module.exports.STATUS = STATUS;
+module.exports.situacaoDaCobranca = situacaoDaCobranca;
 
 // ── AS COBRANÇAS DE UM AULÃO, POR PESSOA ──────────────────────────────────
 //
@@ -1424,7 +2230,12 @@ Finance_model.prototype.cobrancasDeAulao = async function (aulaoId) {
   const pagamentos = await this.payments();
   const somas = await pagamentos
     .aggregate([
-      { $match: { charge: { $in: cobrancas.map((c) => c._id) }, ...statusDePagamento.filtroDeEntrada() } },
+      {
+        $match: {
+          charge: { $in: cobrancas.map((c) => c._id) },
+          ...statusDePagamento.filtroDeEntrada(),
+        },
+      },
       {
         $group: {
           _id: "$charge",
@@ -1482,6 +2293,100 @@ Finance_model.prototype.cobrancasDeAulao = async function (aulaoId) {
 // O STATUS é a cobrança: sem ele ela continua "aberta" com nada faltando, e
 // aparece na lista de quem deve com R$ 0,00 — pior que errado, é confuso.
 //
+// ── O QUE ESTÁ ACONTECENDO COM ELA LÁ FORA ───────────────────────────────
+//
+// *"PAYMENT_AUTHORIZED, PAYMENT_AWAITING_RISK_ANALYSIS... deveria tratar
+// esses também"* (15/10/2026).
+//
+// `gateway: { pagamento, situacao, em }`, e NENHUM deles encosta em `status`:
+// aqui "paga" quer dizer que os pagamentos cobrem o valor, e cartão
+// autorizado não é dinheiro na conta. Ver `lib/situacaoNoGateway.js`.
+//
+// O `pagamento` é o id da fatura lá, e ele é o maior ganho escondido deste
+// método: gravado uma vez, todo aviso seguinte daquela fatura encontra ESTA
+// cobrança por identidade, em vez de por vencimento — que é um palpite que
+// erra assim que alguém muda a data no painel do Asaas.
+//
+// Fora de `limparCobranca` de propósito, como o `gateway` da recorrência:
+// isto não vem de formulário nenhum, vem da resposta do gateway.
+Finance_model.prototype.marcarNoGateway = async function (chargeId, dados = {}) {
+  if (!ObjectId.isValid(chargeId)) return false;
+
+  const mudanca = { "gateway.em": new Date(), updatedAt: new Date() };
+  if (dados.pagamento) mudanca["gateway.pagamento"] = String(dados.pagamento);
+  // O LINK da fatura — a página do gateway com pix, boleto e cartão. É o que
+  // a pessoa de fato usa, e guardá-lo é o que deixa reenviá-lo amanhã sem ir
+  // ao painel deles procurar. Só na criação: o webhook não o manda, e um
+  // `$set` com vazio apagaria o que já está gravado.
+  if (dados.url) mudanca["gateway.url"] = String(dados.url);
+  if (situacaoNoGateway.existe(dados.situacao))
+    mudanca["gateway.situacao"] = String(dados.situacao);
+
+  const col = await this.charges();
+  const r = await col.updateOne({ _id: new ObjectId(chargeId) }, { $set: mudanca });
+  return r.matchedCount > 0;
+};
+
+// ── A FATURA DE LÁ DEIXOU DE EXISTIR ─────────────────────────────────────
+//
+// Cancelar a cobrança APAGA a fatura no gateway (ver o PUT em
+// `controllers/Finance.js`), e a partir daí os rastros dela aqui são
+// promessas falsas: o link abriria um 404, o menu ofereceria estornar o que
+// não existe, e gerar de novo seria recusado com 409 por causa de um id
+// morto.
+//
+// Some com os três de uma vez. O que fica é a cobrança cancelada, que pode
+// ser reaberta e gerada outra vez — aí com uma fatura nova, que é o certo:
+// cobrança cancelada e recobrada são dois pedidos, não um.
+Finance_model.prototype.limparNoGateway = async function (chargeId) {
+  if (!ObjectId.isValid(chargeId)) return false;
+
+  const col = await this.charges();
+  const r = await col.updateOne(
+    { _id: new ObjectId(chargeId) },
+    {
+      $unset: { "gateway.pagamento": "", "gateway.url": "", "gateway.situacao": "" },
+      $set: { updatedAt: new Date() },
+    },
+  );
+  return r.matchedCount > 0;
+};
+
+// ── MEXERAM NO VENCIMENTO OU NO VALOR LÁ ─────────────────────────────────
+//
+// Copia a mudança para cá, e SÓ quando a cobrança ainda não tem dinheiro
+// dentro. Uma cobrança com pagamento é história: reescrever o valor dela
+// faria uma quitação virar pagamento parcial (ou sobra) sem ninguém mexer em
+// nada, que é o estrago que o `updateCharge` já causou uma vez.
+//
+// O `periodo` NÃO muda. Ele é a etiqueta que amarra a cobrança à ocorrência
+// da recorrência, e é por ela que a geração sabe que aquele mês já nasceu —
+// trocá-la faria a mensalidade de outubro nascer de novo no dia seguinte.
+Finance_model.prototype.ajustarDoGateway = async function (chargeId, { vencimento, valor } = {}) {
+  if (!ObjectId.isValid(chargeId)) return { ok: false, erro: "nao_achei" };
+
+  const col = await this.charges();
+  const cobranca = await col.findOne({ _id: new ObjectId(chargeId) });
+  if (!cobranca) return { ok: false, erro: "nao_achei" };
+
+  const pagos = await this.paidByCharge(cobranca.student);
+  if ((pagos[String(cobranca._id)] || 0) > 0)
+    return { ok: true, mexeu: false, erro: "tem_pagamento" };
+
+  const mudanca = {};
+  const dia = vencimento ? new Date(`${String(vencimento).slice(0, 10)}T00:00:00.000Z`) : null;
+  if (dia && !Number.isNaN(dia.getTime())) mudanca.dueDate = dia;
+  // Valor zero não vem do gateway por engano — mas se vier, é ruído, e
+  // zerar uma cobrança é o tipo de estrago que ninguém procura.
+  if (Number(valor) > 0) mudanca.amount = Math.round(Number(valor));
+
+  if (!Object.keys(mudanca).length) return { ok: true, mexeu: false };
+
+  mudanca.updatedAt = new Date();
+  await col.updateOne({ _id: cobranca._id }, { $set: mudanca });
+  return { ok: true, mexeu: true };
+};
+
 // ── IDEMPOTENTE ──────────────────────────────────────────────────────────
 //
 // Clicar duas vezes não lança dois pagamentos. `falta <= 0` devolve `ja_pago`
@@ -1501,7 +2406,10 @@ Finance_model.prototype.quitarCobranca = async function (chargeId, { method, cre
     // Já estava quitada no dinheiro. O status é fechado de todo jeito: pode ter
     // ficado "aberto" por um pagamento lançado à mão na tela do financeiro.
     if (cobranca.status === "open") {
-      await col.updateOne({ _id: cobranca._id }, { $set: { status: "paid", updatedAt: new Date() } });
+      await col.updateOne(
+        { _id: cobranca._id },
+        { $set: { status: "paid", updatedAt: new Date() } },
+      );
     }
     return { ok: true, erro: "ja_pago", falta: 0 };
   }
@@ -1520,7 +2428,7 @@ Finance_model.prototype.quitarCobranca = async function (chargeId, { method, cre
       automatico: true,
     },
     createdBy,
-    cobranca.currency
+    cobranca.currency,
   );
 
   await col.updateOne({ _id: cobranca._id }, { $set: { status: "paid", updatedAt: new Date() } });
@@ -1607,7 +2515,7 @@ Finance_model.prototype.reabrirCobranca = async function (chargeId) {
 
   await col.updateOne(
     { _id: cobranca._id },
-    { $set: { status: falta > 0 ? "open" : "paid", updatedAt: new Date() } }
+    { $set: { status: falta > 0 ? "open" : "paid", updatedAt: new Date() } },
   );
 
   return { ok: true, apagados, falta };

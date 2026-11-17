@@ -1,0 +1,21 @@
+{
+  "errors": {
+    "gatewayUnknown": "Cette passerelle de paiement n'existe pas",
+    "gatewayNoKey": "Collez la clé d'API de la passerelle",
+    "gatewayBadKey": "La passerelle a refusé cette clé. Vérifiez que vous l'avez copiée en entier.",
+    "gatewayWrongKeyType": "C'est la clé publique (pk_), qui ne sert qu'à tokeniser les cartes. L'intégration a besoin de la clé secrète (sk_) — créez-en une sur le même écran.",
+    "gatewayUnreachable": "Impossible de joindre la passerelle pour le moment. La clé est peut-être bonne : réessayez dans un instant.",
+    "gatewayNotSet": "Configurez cette passerelle avant de la choisir",
+    "gatewayNoTokenize": "Cette passerelle n'enregistre pas les cartes",
+    "cardNoPerson": "Cette personne n'existe pas",
+    "cardNotFound": "Cette carte n'est plus enregistrée",
+    "cardNoGateway": "L'unité de cette personne n'a pas de passerelle capable d'enregistrer des cartes",
+    "cardNoTokenization": "Le compte de la passerelle n'a pas encore la tokenisation de carte activée. Demandez-la à leur support et cochez la case dans Configuration › Passerelles de paiement.",
+    "cardNoDocument": "Indiquez le numéro fiscal du titulaire — la passerelle l'exige pour enregistrer la carte",
+    "cardHolderIncomplete": "Il manque des informations du titulaire exigées par la passerelle : nom, e-mail, numéro fiscal, téléphone, code postal et numéro",
+    "cardBadDocument": "Le numéro fiscal du titulaire doit comporter 11 chiffres (ou 14 pour une société)",
+    "cardBadZip": "Le code postal du titulaire doit comporter 8 chiffres",
+    "cardIncomplete": "Il manque des informations de la carte",
+    "cardRefused": "La passerelle n'a pas enregistré cette carte."
+  }
+}

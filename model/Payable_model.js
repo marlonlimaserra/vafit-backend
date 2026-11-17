@@ -54,7 +54,10 @@ Payable_model.prototype.collection = async function () {
 
 function centavos(v) {
   if (typeof v === "number") return Math.round(v * (Number.isInteger(v) ? 1 : 100));
-  const limpo = String(v ?? "").replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".");
+  const limpo = String(v ?? "")
+    .replace(/[^\d,.-]/g, "")
+    .replace(/\./g, "")
+    .replace(",", ".");
   const n = Number(limpo);
   return Number.isFinite(n) ? Math.round(n * 100) : 0;
 }
@@ -73,7 +76,10 @@ function dia(valor, padrao = null) {
 }
 
 const CAMPOS = {
-  description: (v) => String(v || "").trim().slice(0, 200),
+  description: (v) =>
+    String(v || "")
+      .trim()
+      .slice(0, 200),
   // ── QUEM RECEBE, agora por REFERÊNCIA ─────────────────────────────────
   //
   // Era texto livre, com o argumento de que um cadastro seria uma tela a mais.
@@ -92,7 +98,10 @@ const CAMPOS = {
   paidAt: (v) => dia(v),
   status: (v) => (statusDeCobranca.GRAVAVEIS.includes(String(v)) ? String(v) : "open"),
   unit: (v) => (ObjectId.isValid(v) ? new ObjectId(String(v)) : null),
-  note: (v) => String(v || "").trim().slice(0, 2000),
+  note: (v) =>
+    String(v || "")
+      .trim()
+      .slice(0, 2000),
 };
 
 function limpar(obj) {
@@ -172,7 +181,7 @@ Payable_model.prototype.saveReceipt = async function (id, anexo) {
         updatedAt: new Date(),
       },
     },
-    { upsert: true }
+    { upsert: true },
   );
 
   const col = await this.collection();
@@ -242,7 +251,7 @@ Payable_model.prototype.update = async function (id, obj) {
   const col = await this.collection();
   const r = await col.updateOne(
     { _id: new ObjectId(id) },
-    { $set: { ...set, updatedAt: new Date() } }
+    { $set: { ...set, updatedAt: new Date() } },
   );
 
   return r.matchedCount > 0;
@@ -310,6 +319,51 @@ function fimDoDia(valor, fuso) {
 // cartões falam do PERÍODO, e não da parte da lista que alguém resolveu ver. É
 // a mesma decisão da carteira, e pela mesma razão — *"cada vez que eu troco de
 // aba, os valores ali em cima mudam"*.
+// ── A SÉRIE MENSAL DO PAINEL (22/10/2026) ────────────────────────────────
+//
+// Quanto saiu, mês a mês. A mesma conta do cartão — `status open` somado por
+// mês de vencimento —, só que doze vezes.
+//
+// ── E AQUI O FUSO *NÃO* ENTRA ────────────────────────────────────────────
+//
+// Na cobrança entra, e a diferença é de armazenamento, não de gosto: o
+// `dueDate` de uma cobrança é um instante de verdade (a do compromisso herda a
+// hora do atendimento), e o de uma conta a pagar é `Date.UTC(ano, mês, dia)` —
+// meia-noite UTC do dia do calendário, porque vencimento de conta não é um
+// instante (ver `dia()` lá em cima).
+//
+// Aplicar `timezone: "America/Sao_Paulo"` a uma meia-noite UTC devolve **21h do
+// dia anterior**. Toda conta que vence no dia 1º seria contada no mês passado,
+// e o erro só apareceria na virada — a pior hora para descobrir um relatório
+// errado. Então o mês sai do UTC, que é onde a data foi escrita.
+Payable_model.prototype.serieMensal = async function ({ de, ate, unit, units } = {}) {
+  const col = await this.collection();
+
+  const janela = { dueDate: { $gte: dia(de), $lte: dia(ate) } };
+
+  const cerca = {};
+  if (ObjectId.isValid(unit)) cerca.unit = new ObjectId(String(unit));
+  else {
+    const dele = lenteDeUnidade.filtroDeUnidades(units);
+    if (dele) Object.assign(cerca, dele);
+  }
+
+  const linhas = await col
+    .aggregate([
+      { $match: { ...janela, ...cerca } },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m", date: "$dueDate" } },
+          aPagar: { $sum: { $cond: [{ $eq: ["$status", "open"] }, "$amount", 0] } },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ])
+    .toArray();
+
+  return linhas.map((l) => ({ r: l._id, aPagar: l.aPagar || 0 }));
+};
+
 Payable_model.prototype.listar = async function ({
   units,
   de,
@@ -371,10 +425,7 @@ Payable_model.prototype.listar = async function ({
       // alguém passar todo dia meia-noite mudando linhas. Calculada, ela está
       // certa no instante em que se olha.
       atrasada: {
-        $and: [
-          { $eq: [{ $ifNull: ["$status", "open"] }, "open"] },
-          { $lt: ["$dueDate", hoje] },
-        ],
+        $and: [{ $eq: [{ $ifNull: ["$status", "open"] }, "open"] }, { $lt: ["$dueDate", hoje] }],
       },
       // Do mesmo marco: uma conta que vence hoje tem ZERO dia de atraso, e uma
       // que venceu ontem tem um — e não "zero e pouco", que era o que a divisão

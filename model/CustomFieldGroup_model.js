@@ -213,25 +213,57 @@ CustomFieldGroup_model.prototype.reordenar = async function (ids) {
   return { ok: true, quantos: operacoes.length };
 };
 
-// Roda a cada boot, como os papéis do sistema. Só escreve o que falta.
-CustomFieldGroup_model.prototype.semear = async function () {
-  const col = await this.collection();
-  if (await col.findOne({ key: PADRAO })) return { criados: 0 };
-
-  await col.insertOne({
-    // Sem `name`: o rótulo sai da tradução de quem abre, como nos campos
-    // nativos. Renomeou, o nome dela vence.
-    name: "",
-    rotuloPadrao: "customFields.group.principal",
+// ── AS GAVETAS QUE TODA INSTÂNCIA GANHA ──────────────────────────────────
+//
+// `principal` existe desde o início: é para onde todo campo cai e para onde os
+// órfãos voltam quando uma gaveta é apagada.
+//
+// `endereco` entrou em 14/10/2026, antes de ser preciso: *"quando a gente
+// habilitar isso [o gateway], vamos precisar de endereço da pessoa, CPF...
+// acho que é melhor, por padrão, já vir um grupo chamado endereços em todas as
+// instâncias"*. E ele está certo na ordem das coisas — o endereço é o dado que
+// a casa leva MESES juntando, uma pessoa por vez, na recepção. Pedir no dia em
+// que a cobrança for ligada é descobrir que ninguém tem.
+//
+// Sem `name`: o rótulo sai da tradução de quem abre, como nos campos nativos.
+// Renomeou, o nome dela vence.
+const SEMENTES = [
+  {
     key: PADRAO,
+    rotuloPadrao: "customFields.group.principal",
     cor: COR_PADRAO,
     icone: "User",
     ordem: 0,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  });
+  },
+  {
+    key: "endereco",
+    rotuloPadrao: "customFields.group.endereco",
+    cor: PALETA.cyan,
+    icone: "MapPin",
+    ordem: 30,
+  },
+];
 
-  return { criados: 1 };
+// Roda a cada boot, como os papéis do sistema. Só escreve o que falta.
+//
+// Devolve QUAIS gaveta nasceram agora, e não só quantas: é esse "agora" que
+// `CustomField_model.semear` usa como marca de uma-vez-só. Sem ela, um campo
+// semeado e depois apagado pela casa ressuscitaria no boot seguinte — e
+// "apagar" que não apaga é pior que não deixar apagar.
+CustomFieldGroup_model.prototype.semear = async function () {
+  const col = await this.collection();
+  const existentes = new Set(
+    (await col.find({}, { projection: { key: 1 } }).toArray()).map((g) => g.key)
+  );
+
+  const novos = SEMENTES.filter((g) => !existentes.has(g.key));
+  if (!novos.length) return { criados: 0, novos: [] };
+
+  await col.insertMany(
+    novos.map((g) => ({ ...g, name: "", createdAt: new Date(), updatedAt: new Date() }))
+  );
+
+  return { criados: novos.length, novos: novos.map((g) => g.key) };
 };
 
 module.exports = CustomFieldGroup_model;

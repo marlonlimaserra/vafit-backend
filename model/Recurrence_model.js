@@ -99,6 +99,29 @@ const CAMPOS = {
   // academia. Reajustar quem está dentro é outra operação, deliberada, e nunca
   // um efeito colateral de editar o cardápio.
   membership: (v) => (ObjectId.isValid(v) ? new ObjectId(v) : null),
+  // ── CADA MENSALIDADE NASCE TAMBÉM NO GATEWAY ──────────────────────────
+  //
+  // *"faltou o checkbox do criar no asaas também"* (19/10/2026).
+  //
+  // É uma propriedade da REGRA, e não de um clique: a assinatura gera uma
+  // cobrança por mês, para sempre, e quem marcou isto uma vez não vai abrir a
+  // ficha em todo dia 5 para pedir o boleto. A geração lê este campo e emite
+  // a fatura de cada ocorrência nova — ver `gerar`.
+  //
+  // O que NÃO é: uma assinatura no gateway. Quem conta os meses continua
+  // sendo esta regra; lá embaixo nascem faturas avulsas, uma por mês. Assim
+  // cancelar aqui para de gerar, sem depender de desfazer nada lá.
+  noGateway: (v) => Boolean(v),
+  // ── A FORMA COMBINADA ─────────────────────────────────────────────────
+  //
+  // *"em parcelamento e assinatura, faltaram os métodos de pagamento igual em
+  // fatura avulsa"* (19/10/2026). Ela é copiada para cada mensalidade que
+  // nascer — ver `gerar` —, e daí decide o `billingType` da fatura.
+  //
+  // Vazio é "todas", e é o padrão: a fatura abre com pix, boleto e cartão, e
+  // quem escolhe é quem paga. O formato é o mesmo que a cobrança cobra — a
+  // CHAVE do catálogo, nunca uma frase.
+  method: (v) => (/^[a-z0-9][a-z0-9-]{0,29}$/.test(String(v || "")) ? String(v) : ""),
 };
 
 Recurrence_model.prototype.insert = async function (studentId, obj, createdBy, currency) {
@@ -160,6 +183,41 @@ Recurrence_model.prototype.update = async function (id, obj) {
   }
 
   const r = await col.updateOne({ _id: new ObjectId(id) }, { $set: mudanca });
+  return r.matchedCount > 0;
+};
+
+// ── O VÍNCULO COM O GATEWAY ───────────────────────────────────────────────
+//
+// *"e salve os ids do nosso lado"* (14/10/2026).
+//
+// FORA de `CAMPOS` de propósito. Aquela tabela é o que um formulário pode
+// gravar; isto não vem de formulário nenhum — vem da resposta do Asaas, e
+// deixá-lo ali abriria "mande o id da assinatura de outra pessoa" como edição
+// válida de uma recorrência.
+//
+// `criadoEm` responde a pergunta que se faz meses depois, olhando uma
+// assinatura estranha na tela do Asaas: quando foi que isto nasceu, e por qual
+// caminho.
+Recurrence_model.prototype.marcarNoGateway = async function (id, dados) {
+  if (!ObjectId.isValid(id)) return false;
+  const col = await this.collection();
+
+  const r = await col.updateOne(
+    { _id: new ObjectId(id) },
+    {
+      $set: {
+        gateway: {
+          tipo: String(dados.tipo || ""),
+          ambiente: dados.ambiente === "sandbox" ? "sandbox" : "producao",
+          cliente: String(dados.cliente || ""),
+          assinatura: String(dados.assinatura || ""),
+          criadoEm: new Date(),
+        },
+        updatedAt: new Date(),
+      },
+    }
+  );
+
   return r.matchedCount > 0;
 };
 
@@ -227,12 +285,53 @@ Recurrence_model.prototype.todas = async function ({
     },
   };
 
+  // ── O PLANO, só pelo NOME ───────────────────────────────────────────────
+  //
+  // A recorrência nascida de um plano não guarda mais o nome dele (ver
+  // `escolherPlano` no formulário): guarda o vínculo. Sem esta junção, toda
+  // mensalidade vendida pela vitrine apareceria nesta tabela como um travessão
+  // na coluna "O quê".
+  //
+  // O `instance` entra à mão porque sub-pipeline de `$lookup` não passa pelo
+  // escopo automático — a mesma razão da junção com as pessoas, logo acima.
+  const juntarPlano = {
+    $lookup: {
+      from: "memberships",
+      let: { plano: "$membership" },
+      pipeline: [
+        {
+          $match: {
+            $expr: { $eq: ["$_id", "$$plano"] },
+            ...(instancia ? { instance: instancia } : {}),
+          },
+        },
+        { $project: { name: 1 } },
+      ],
+      as: "plano",
+    },
+  };
+
   const derivados = {
     $addFields: {
       studentName: { $ifNull: [{ $arrayElemAt: ["$pessoa.name", 0] }, ""] },
       studentAvatarAt: { $ifNull: [{ $arrayElemAt: ["$pessoa.avatarAt", 0] }, null] },
       studentUnit: { $ifNull: [{ $arrayElemAt: ["$pessoa.unit", 0] }, null] },
       estado: { $ifNull: ["$status", statusDeRecorrencia.PADRAO] },
+      // O texto digitado vence; na falta dele, o nome do plano. Calculado AQUI,
+      // antes do recorte, e por isso procurar por "Plano Fit" também acha as
+      // regras que nunca tiveram descrição nenhuma.
+      description: {
+        $let: {
+          vars: { digitada: { $trim: { input: { $ifNull: ["$description", ""] } } } },
+          in: {
+            $cond: [
+              { $ne: ["$$digitada", ""] },
+              "$$digitada",
+              { $ifNull: [{ $arrayElemAt: ["$plano.name", 0] }, ""] },
+            ],
+          },
+        },
+      },
     },
   };
 
@@ -278,6 +377,8 @@ Recurrence_model.prototype.todas = async function ({
       endsAt: 1,
       status: "$estado",
       canceledReason: { $ifNull: ["$canceledReason", ""] },
+      noGateway: { $ifNull: ["$noGateway", false] },
+      method: { $ifNull: ["$method", ""] },
     },
   };
 
@@ -292,6 +393,7 @@ Recurrence_model.prototype.todas = async function ({
   const [saida] = await col
     .aggregate([
       juntarPessoa,
+      juntarPlano,
       derivados,
       ...(lenteDaUnidade ? [{ $match: { studentUnit: lenteDaUnidade } }] : []),
       {
@@ -370,6 +472,61 @@ Recurrence_model.prototype.deleteAllOfStudent = async function (studentId) {
 // de duas telas, e uma recorrência com data estranha não pode derrubar o
 // financeiro de ninguém. Falha aqui vira linha de log — a próxima leitura tenta
 // de novo, porque tudo aqui é idempotente.
+// ── A LÁPIDE DE UM PERÍODO ────────────────────────────────────────────────
+//
+// *"tentei excluir o pagamento que pertence a assinatura, ele falou que apagou
+// mas continua"* (17/10/2026).
+//
+// Apagar a mensalidade de setembro fazia setembro voltar a "faltar", e a
+// próxima leitura da tela a criava de novo. Anotar o período aqui é o que faz
+// a geração tratá-lo como resolvido — apagar volta a querer dizer apagar.
+//
+// `$addToSet` e não `$push`: apagar duas vezes a mesma etiqueta (duas abas,
+// dois cliques) não pode encher a lista.
+Recurrence_model.prototype.naoGerarMais = async function (id, periodo) {
+  if (!ObjectId.isValid(id) || !periodo) return false;
+  const col = await this.collection();
+  const r = await col.updateOne(
+    { _id: new ObjectId(id) },
+    { $addToSet: { periodosApagados: String(periodo) }, $set: { updatedAt: new Date() } }
+  );
+  return r.modifiedCount > 0;
+};
+
+// A FATURA DE UMA MENSALIDADE RECÉM-NASCIDA.
+//
+// Separada da geração porque ela é a parte que fala com o mundo lá fora: uma
+// chamada de rede por ocorrência, que pode demorar e pode recusar. Engolir o
+// erro aqui é deliberado — quem chama está no meio de um laço que não pode
+// parar por causa de uma, e o estrago de uma fatura que não saiu é
+// recuperável pelo menu da linha; o de uma mensalidade que não nasceu, não.
+Recurrence_model.prototype.emitirFatura = async function (regra, chargeId) {
+  try {
+    const student = await this.app.api.user.data(String(regra.student));
+    if (!student) return false;
+
+    const cobranca = await this.app.api.finance.chargeData(String(chargeId));
+    if (!cobranca) return false;
+
+    const { emitirAvulsa } = require("../lib/faturaNoGateway.js");
+    const feito = await emitirAvulsa(this.app, student, cobranca);
+    if (!feito.ok) {
+      console.warn("[recorrencia] a fatura da mensalidade não saiu: " + (feito.erro || "?"));
+      return false;
+    }
+
+    await this.app.api.finance.marcarNoGateway(String(chargeId), {
+      pagamento: feito.id,
+      url: feito.link,
+      situacao: feito.situacao,
+    });
+    return true;
+  } catch (erro) {
+    console.error("[recorrencia] falha ao emitir a fatura:", erro?.message || erro);
+    return false;
+  }
+};
+
 Recurrence_model.prototype.gerar = async function ({
   student = null,
   // UMA regra só — é por onde o consumidor da fila entra. A mensagem carrega o
@@ -419,6 +576,28 @@ Recurrence_model.prototype.gerar = async function ({
       porRegra.get(chave).add(String(c.periodo || ""));
     }
 
+    // ── QUEM NOMEIA A COBRANÇA QUANDO A REGRA NÃO TEM NOME ────────────────
+    //
+    // O PLANO, pelo vínculo. Desde 15/10/2026 a recorrência criada a partir de
+    // um plano nasce com a descrição vazia — *"descrição deveria ficar em
+    // branco"* —, e sem isto a mensalidade apareceria no extrato como uma linha
+    // sem assunto nenhum.
+    //
+    // O nome entra COPIADO na cobrança, e aqui isso é o certo: a cobrança é um
+    // fato de um mês, e ela tem de continuar dizendo o que foi cobrado mesmo
+    // depois de o plano ser renomeado ou apagado. A regra é que fica viva e
+    // aponta para o plano; a cobrança é história.
+    //
+    // Uma consulta só, e só para as regras que precisam.
+    const nomeDoPlano = new Map();
+    const semNome = regras.filter((r) => !String(r.description || "").trim() && r.membership);
+    if (semNome.length) {
+      const planos = await (await this.app.api.membership.collection())
+        .find({ _id: { $in: semNome.map((r) => r.membership) } }, { projection: { name: 1 } })
+        .toArray();
+      for (const p of planos) nomeDoPlano.set(String(p._id), String(p.name || ""));
+    }
+
     let criadas = 0;
 
     for (const regra of regras) {
@@ -426,17 +605,23 @@ Recurrence_model.prototype.gerar = async function ({
       // sempre, num cadastro que alguém deixou pela metade.
       if (!regra.amount) continue;
 
+      // O QUE JÁ EXISTE **mais** o que foi apagado de propósito. Para a
+      // geração os dois são a mesma coisa: período resolvido, não refazer.
+      // Ver `naoGerarMais`.
+      const resolvidos = new Set(porRegra.get(String(regra._id)) || []);
+      for (const etiqueta of regra.periodosApagados || []) resolvidos.add(String(etiqueta));
+
       const faltando = recorrencia.pendentes({
         inicio: regra.startsAt,
         fim: regra.endsAt,
         cadencia: regra.cadencia,
         hoje,
-        jaGeradas: porRegra.get(String(regra._id)) || new Set(),
+        jaGeradas: resolvidos,
       });
 
       for (const ocorrencia of faltando) {
         try {
-          await cobrancas.insertOne({
+          const nascida = await cobrancas.insertOne({
             student: regra.student,
             currency: regra.currency || null,
             createdBy: regra.createdBy || null,
@@ -448,7 +633,14 @@ Recurrence_model.prototype.gerar = async function ({
             periodo: ocorrencia.etiqueta,
             amount: regra.amount,
             dueDate: ocorrencia.data,
-            description: regra.description || "",
+            description:
+              String(regra.description || "").trim() ||
+              nomeDoPlano.get(String(regra.membership)) ||
+              "",
+            // COPIADA, como o valor e a descrição: a cobrança é um fato do
+            // mês, e trocar a forma na regra em março não pode reescrever o
+            // que já foi combinado em janeiro.
+            method: regra.method || "",
             status: "open",
             note: "",
             createdAt: new Date(),
@@ -456,6 +648,32 @@ Recurrence_model.prototype.gerar = async function ({
           });
 
           criadas++;
+
+          // ── E A FATURA DELA, QUANDO A REGRA PEDE ────────────────────
+          //
+          // *"faltou o checkbox do criar no asaas também"* (19/10/2026). A
+          // mensalidade que nasce aqui é a mesma que o aluno precisa receber
+          // para pagar — sem a fatura, alguém teria de abrir a ficha todo mês
+          // e clicar "gerar", que é exatamente o trabalho que a assinatura
+          // existe para não dar.
+          //
+          // DEPOIS do `criadas++`, e sem poder derrubar nada: a cobrança daqui
+          // já existe e é o fato contábil. Gateway fora do ar não pode fazer a
+          // mensalidade de outubro deixar de ser criada — ela ficaria sem
+          // registro E sem boleto. Falhando, fica a cobrança, e o link se gera
+          // pelo menu da linha.
+          //
+          // Com try PRÓPRIO, e não encostado no de fora: aquele relança o que
+          // não é 11000, e um erro vindo da rede derrubaria o laço inteiro —
+          // a mensalidade de novembro deixaria de nascer porque a de outubro
+          // não conseguiu boleto.
+          if (regra.noGateway) {
+            try {
+              await this.emitirFatura(regra, nascida.insertedId);
+            } catch (falha) {
+              console.error("[recorrencia] fatura da mensalidade:", falha?.message || falha);
+            }
+          }
         } catch (erro) {
           // 11000 é o índice único fazendo o trabalho dele: outra requisição
           // criou esta mesma mensalidade entre a nossa leitura e a nossa

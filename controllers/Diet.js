@@ -266,6 +266,29 @@ module.exports = function (app) {
         return null;
       }
 
+      // ── ALIMENTO SEM `imageKey` AINDA ACHA A FOTO PELO NOME ────────────────
+      //
+      // Relato do Marlon (15/11/2026): *"ao clicar em ver pdf, a fotinho do
+      // alimento não vem"*. A tela da dieta mostra as fotos; o documento não.
+      //
+      // A causa: planos gerados pela IA e planos antigos foram gravados com
+      // `imageKey` VAZIO em cada alimento — a chave do catálogo não foi copiada
+      // na hora. A tela não se importa porque ADIVINHA pelo nome (`chaveDaFoto`
+      // com `adivinhar:true`, em nutricao.js); o documento lia só o `imageKey`
+      // gravado, e por isso saía sem foto embora o catálogo tivesse todas.
+      //
+      // Aqui o documento passa a usar o MESMO caminho de trás: nome → slug →
+      // chave. Seguro porque o `byKey` abaixo casa a chave exata ou devolve
+      // nada — nome fora do catálogo segue sem foto, nunca com a errada. Vale
+      // para todo plano já existente, sem migração.
+      for (const refei of diet.meals || []) {
+        for (const alimento of refei.foods || []) {
+          if (!alimento.imageKey && alimento.name) {
+            alimento.imageKey = app.api.foodImage.chaveDoNome(alimento.name);
+          }
+        }
+      }
+
       const [student, fuso, casa] = await Promise.all([
         app.api.user.dataStudent(trainer._id, diet.student),
         app.api.tenant.timezoneOfInstance(),

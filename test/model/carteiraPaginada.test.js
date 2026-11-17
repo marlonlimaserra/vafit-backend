@@ -541,3 +541,81 @@ test("o RESUMO continua cego ao estado pedido", async () => {
   assert.ok(texto(resumo).includes("pendente"), "pendente é um cartão");
   assert.ok(!texto(resumo).includes("$in\":"), "o resumo não enxerga o estado pedido");
 });
+
+// ── OS AVULSOS NA MESMA LISTA ─────────────────────────────────────────────
+//
+// *"até hoje acho isso confuso... deixe só pagamento no sistema inteiro"*
+// (17/10/2026). As abas Cobranças e Pagamentos eram dois substantivos para a
+// mesma pergunta — e o mesmo rótulo "Pagamentos" queria dizer coisas
+// diferentes no Financeiro geral e na ficha da pessoa.
+//
+// Um pagamento AVULSO é um pagamento que nasceu pago: sem cobrança do outro
+// lado, sem vencimento, sem falta. Ele passou a ser LINHA desta lista.
+test("sem pedir, a carteira continua sendo só de cobranças", async () => {
+  // A opção é explícita porque `carteira` serve mais de uma tela. Ligá-la
+  // sozinha mudaria o extrato da ficha e a folha impressa sem ninguém pedir.
+  const { model, chamadas } = fakeModel();
+  await model.carteira({});
+
+  assert.equal(nomes(chamadas[0].pipeline).includes("$unionWith"), false);
+});
+
+test("com avulsos, a união entra ANTES do facet", async () => {
+  // É isso que faz a paginação e os cartões do topo falarem do mesmo
+  // conjunto. Depois do `$facet` seria tarde: a página 1 teria vinte e cinco
+  // cobranças e os avulsos apareceriam colados no fim, fora de ordem.
+  const { model, chamadas } = fakeModel();
+  await model.carteira({ comAvulsos: true });
+
+  const ordem = nomes(chamadas[0].pipeline);
+  assert.ok(ordem.indexOf("$unionWith") > -1, "a união tem de existir");
+  assert.ok(ordem.indexOf("$unionWith") < ordem.indexOf("$facet"));
+  // E depois das duas junções: o lado das cobranças só tem `pago` e o nome da
+  // pessoa a partir dali, e o que vem da união chega com os mesmos nomes.
+  assert.ok(ordem.indexOf("$unionWith") > ordem.lastIndexOf("$lookup"));
+});
+
+test("a união pega só pagamento SEM cobrança", async () => {
+  // Com os que têm cobrança, cada pagamento apareceria duas vezes: como linha
+  // própria e dentro do `pago` da cobrança dele. O total do mês dobraria.
+  const { model, chamadas } = fakeModel();
+  await model.carteira({ comAvulsos: true });
+
+  const uniao = estagio(chamadas[0].pipeline, "$unionWith").$unionWith;
+  assert.equal(uniao.coll, "payments");
+
+  const filtro = estagio(uniao.pipeline, "$match").$match;
+  assert.deepEqual(filtro.$or, [{ charge: null }, { charge: { $exists: false } }]);
+});
+
+test("a janela do avulso é a data DELE, e não um vencimento", async () => {
+  // A cobrança é filtrada pelo vencimento; o avulso não tem nenhum. Usar o
+  // mesmo campo deixaria todo avulso fora de toda janela — e dinheiro que
+  // entrou e não aparece em lugar nenhum é o pior buraco de relatório.
+  const { model, chamadas } = fakeModel();
+  await model.carteira({ comAvulsos: true, de: "2026-10-01", ate: "2026-10-31" });
+
+  const uniao = estagio(chamadas[0].pipeline, "$unionWith").$unionWith;
+  const filtro = estagio(uniao.pipeline, "$match").$match;
+
+  assert.ok(filtro.date, "a janela do avulso é por `date`");
+  assert.equal(filtro.dueDate, undefined);
+});
+
+test("o avulso vira linha com falta zero e sem número", async () => {
+  // `dueDate` recebe a data do pagamento para a ORDENAÇÃO funcionar nos dois,
+  // e a tela sabe que é avulso pela marca.
+  const { model, chamadas } = fakeModel();
+  await model.carteira({ comAvulsos: true });
+
+  const uniao = estagio(chamadas[0].pipeline, "$unionWith").$unionWith;
+  const campos = estagio(uniao.pipeline, "$addFields").$addFields;
+
+  assert.equal(campos.avulso, true);
+  assert.equal(campos.numero, null);
+  assert.equal(campos.dueDate, "$date");
+  // Reembolsado e cancelado não são receita: entram com `pago` zero, e por
+  // isso não somam no cartão de recebido.
+  assert.ok(texto(campos.pago).includes("refunded"));
+  assert.ok(texto(campos.pago).includes("canceled"));
+});

@@ -132,10 +132,24 @@ function partes(caminho) {
   return caminho.split("/").filter(Boolean);
 }
 
+// ── O `:param?` DO EXPRESS, que este arreio não entendia ─────────────────
+//
+// Uma rota com parâmetro opcional casa com DOIS tamanhos de caminho, e o
+// comparador exigia tamanhos iguais. O sintoma é cruel: a rota existe, o
+// Express a serviria em produção, e o teste diz "rota não registrada" — como
+// se o controlador tivesse esquecido de declará-la.
+//
+// Apareceu com `/public/gateway-webhook/:tipo/:instancia/:unidade?`, em que a
+// ausência da unidade quer dizer "a conta da casa".
+const opcional = (p) => p.startsWith(":") && p.endsWith("?");
+
 function mesmaRota(padrao, real) {
   const a = partes(padrao);
   const b = partes(real);
-  if (a.length !== b.length) return false;
+
+  const minimo = a.filter((p) => !opcional(p)).length;
+  if (b.length < minimo || b.length > a.length) return false;
+
   return a.every((p, i) => p.startsWith(":") || p === b[i]);
 }
 
@@ -144,7 +158,9 @@ function paramsDe(padrao, real) {
   const b = partes(real);
   const out = {};
   a.forEach((p, i) => {
-    if (p.startsWith(":")) out[p.slice(1)] = b[i];
+    // O `?` é marca do padrão, não parte do nome: sem tirá-lo, o handler
+    // procuraria `req.params.unidade` e acharia `req.params["unidade?"]`.
+    if (p.startsWith(":")) out[p.slice(1).replace(/\?$/, "")] = b[i];
   });
   return out;
 }
@@ -155,8 +171,14 @@ function paramsDe(padrao, real) {
 // `pedidas` guarda as permissões exigidas em cada chamada, para um teste poder
 // afirmar que a rota está protegida pela chave certa — esconder o menu não é
 // proteção, quem protege é isto.
-function permiteTudo(user) {
+// `negadas` tira chaves específicas desse "tudo" — é o que permite testar a
+// rota que faz MENOS sem a permissão, em vez de simplesmente recusar. A
+// primeira delas foi `finance.recurrenceAmount`: sem ela o valor não vem do
+// formulário, vem do plano (ver `controllers/Finance.js`).
+function permiteTudo(user, negadas = []) {
   const pedidas = [];
+  const temChave = (permissao) => !negadas.includes(String(permissao));
+
   return {
     pedidas,
     helpers: {
@@ -166,11 +188,25 @@ function permiteTudo(user) {
         },
         async can(req, res, permission) {
           pedidas.push(permission);
+          if (!temChave(permission)) {
+            res.status(403).send({ msg: "sem permissão", permission });
+            return false;
+          }
           return user;
         },
         async canAll(req, res, permissions) {
           pedidas.push(...permissions);
+          const faltando = permissions.find((p) => !temChave(p));
+          if (faltando) {
+            res.status(403).send({ msg: "sem permissão", permission: faltando });
+            return false;
+          }
           return user;
+        },
+        // O teste SEM resposta: é o que a rota usa para decidir quanto pode
+        // fazer, e não se pode entrar.
+        has(_user, permission) {
+          return temChave(permission);
         },
       },
     },

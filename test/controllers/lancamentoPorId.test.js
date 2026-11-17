@@ -52,6 +52,10 @@ function monta({ cobranca = null, pagamento = null, vinculado = true } = {}) {
         },
       },
       recurrence: { async gerar() { return 0; } },
+      // A janela também pergunta pelo GATEWAY da unidade da pessoa: é ele que
+      // diz quais formas a fatura aceita. Sem conta ativa, `null` — e o
+      // seletor de forma oferece o catálogo inteiro da casa.
+      paymentGateway: { async ativo() { return null; } },
     },
   });
 

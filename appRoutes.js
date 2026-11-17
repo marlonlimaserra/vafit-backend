@@ -17,6 +17,10 @@ routes.WebhookMeta = require("./controllers/WebhookMeta.js");
 // integração: aqui se conecta, lá chega o que ela produz.
 routes.ContasConectadas = require("./controllers/ContasConectadas.js");
 routes.ActionHistory = require("./controllers/ActionHistory.js");
+// O PAINEL — a primeira tela de quem entra. Controller próprio e não dentro de
+// Student: ele não fala de pessoa, fala do DIA da casa, e monta o que monta
+// lendo oito modelos que não são dele.
+routes.Dashboard = require("./controllers/Dashboard.js");
 routes.Student = require("./controllers/Student.js");
 routes.Workout = require("./controllers/Workout.js");
 routes.Exercise = require("./controllers/Exercise.js");
@@ -34,10 +38,22 @@ routes.Lead = require("./controllers/Lead.js");
 routes.CustomField = require("./controllers/CustomField.js");
 routes.CustomFieldGroup = require("./controllers/CustomFieldGroup.js");
 routes.Departamento = require("./controllers/Departamento.js");
+routes.AbaDoPainel = require("./controllers/AbaDoPainel.js");
 routes.Chat = require("./controllers/Chat.js");
 routes.Appointment = require("./controllers/Appointment.js");
 routes.Service = require("./controllers/Service.js");
 routes.Finance = require("./controllers/Finance.js");
+// Por ONDE as cobranças saem: o Asaas ou o Pagar.me da casa. Ao lado do
+// Finance porque é a mesma pergunta vista do outro lado — ele diz o que se
+// deve, este diz por onde se paga.
+routes.PaymentGateway = require("./controllers/PaymentGateway.js");
+// A volta: o gateway avisando que o dinheiro entrou. Vizinho do controlador
+// que configura a chave porque são as duas pontas da mesma integração.
+routes.GatewayWebhook = require("./controllers/GatewayWebhook.js");
+// OS CARTÕES guardados de cada aluno, para as faturas que a casa gera. Vizinho
+// dos dois acima porque é a terceira ponta da mesma integração: aquele guarda
+// a chave, aquele recebe o aviso, este guarda o token que vai ser cobrado.
+routes.CartoesDoAluno = require("./controllers/CartoesDoAluno.js");
 // O cardápio que a ACADEMIA vende aos alunos dela, e as linhas que comparam um
 // plano com o outro. Controller próprio e não dentro de Finance: aquele já tem
 // dezoito rotas, e plano não é lançamento — é catálogo.

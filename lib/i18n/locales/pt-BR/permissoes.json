@@ -7,6 +7,7 @@
     "lastAccountManagingRolesEdit": "Esta é a última conta ativa que gerencia permissões — promova outra antes de alterar esta.",
     "lastManagerGroup": "Este grupo é o que te dá permissão para gerenciar permissões. Apagá-lo trancaria esta tela.",
     "lastRoleManagingRoles": "Este é o único tipo que ainda gerencia permissões, e é o seu. Dê essa permissão a outro tipo antes.",
+    "needRolesManageToGrant": "Só quem gerencia permissões pode conceder ou editar poder de administrador.",
     "noPermission": "Seu tipo de usuário não tem permissão para isso.",
     "roleNameTaken": "Já existe um tipo com esse nome.",
     "roleNotFound": "Tipo de usuário não encontrado."
@@ -46,7 +47,7 @@
         "title": "Exercícios"
       },
       "finance": {
-        "description": "Cobranças, pagamentos e recibos",
+        "description": "Cobranças, assinaturas e recibos",
         "title": "Financeiro"
       },
       "foods": {
@@ -187,6 +188,18 @@
         "manage": {
           "hint": "Lançar cobranças e baixas. A tela está em construção.",
           "label": "Gerenciar o financeiro"
+        },
+        "recurrence": {
+          "hint": "Cadastrar o plano assinado, que gera cobrança sozinho.",
+          "label": "Criar e alterar assinatura"
+        },
+        "recurrenceAmount": {
+          "hint": "Sem esta, o valor é sempre o do plano escolhido — nada de desconto.",
+          "label": "Definir o valor da assinatura"
+        },
+        "recurrenceDelete": {
+          "hint": "Tirar a assinatura do ar. As cobranças já geradas continuam.",
+          "label": "Apagar assinatura"
         },
         "view": {
           "hint": "Abrir a aba financeira e ver cobranças. A tela está em construção.",

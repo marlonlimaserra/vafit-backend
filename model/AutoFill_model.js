@@ -26,7 +26,48 @@ AutoFill_model.prototype.list = async function (professionalId, field) {
   const query = { professional: new ObjectId(professionalId) };
   if (field && fields.isValid(field)) query.field = String(field);
 
-  return await col.find(query).sort({ field: 1, value: 1 }).toArray();
+  const rows = await col.find(query).sort({ field: 1, value: 1 }).toArray();
+  return ordenar(rows);
+};
+
+// Campo NUMÉRICO em ordem de número: a ordem do banco é de texto, e nela "120"
+// vem antes de "30". Os outros campos ficam como o banco devolveu.
+function ordenar(rows) {
+  return rows.sort((a, b) => {
+    if (a.field !== b.field) return a.field < b.field ? -1 : 1;
+    if (fields.campo(a.field)?.numeric) return Number(a.value) - Number(b.value);
+    return 0;
+  });
+}
+
+// ── A SEMEADURA: o padrão entra UMA vez na lista de cada profissional ────
+//
+// Campo com `padrao` (as durações do compromisso) nasce com aqueles valores, e
+// a partir daí a lista é dele. A marca de "já semeei" fica no documento da
+// conta (`autoFillSemeado`), e é lida do BANCO, não da sessão: a sessão é
+// guardada por um minuto, e com ela um valor apagado logo depois de semear
+// voltaria na próxima leitura — o profissional apaga o 45 e o 45 reaparece.
+//
+// Inserir é upsert, então duas leituras ao mesmo tempo semeiam sem duplicar.
+AutoFill_model.prototype.semear = async function (professionalId) {
+  const comPadrao = fields.FIELDS.filter((f) => Array.isArray(f.padrao) && f.padrao.length);
+  if (!comPadrao.length) return [];
+
+  const conta = await this.app.api.user.data(professionalId);
+  if (!conta) return [];
+
+  const feitos = new Set((conta.autoFillSemeado || []).map(String));
+  const faltam = comPadrao.filter((f) => !feitos.has(f.key));
+  if (!faltam.length) return [];
+
+  for (const f of faltam) {
+    for (const valor of f.padrao) await this.insert(professionalId, f.key, valor);
+  }
+  await this.app.api.user.marcarAutoFillSemeado(
+    professionalId,
+    faltam.map((f) => f.key)
+  );
+  return faltam.map((f) => f.key);
 };
 
 // Devolve tudo agrupado por campo, que é como a tela do perfil desenha.

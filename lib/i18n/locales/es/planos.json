@@ -2,16 +2,24 @@
   "errors": {
     "alreadyOnPlan": "Ya estás en ese plan.",
     "brandImagesNotInPlan": "Tu plan no incluye imágenes de marca. Todavía puedes usar la dirección de una imagen alojada en otro lugar.",
+    "invalidCpf": "Ese CPF no parece válido. Revisa los números.",
     "membershipBenefitInUse": "Este beneficio está marcado en {{count}} plan(es). Desactívelo en vez de borrarlo.",
     "membershipBenefitNotFound": "Beneficio no encontrado.",
-    "membershipInUse": "Este plan está en {{count}} recurrencia(s). Desactívelo en vez de borrarlo.",
+    "membershipInUse": "Este plan está en {{count}} suscripción(es). Desactívalo en vez de borrarlo.",
     "membershipNotFound": "Plan no encontrado.",
     "notInPlan": "Tu plan no incluye {{o}}. Habla con quien gestiona tu cuenta.",
+    "planHasOwnLink": "Este plan usa su propio enlace de contratación.",
     "planInactive": "Ese plan ya no está disponible.",
     "planIsFree": "El plan gratuito no necesita pago.",
     "planLimitReached": "Tu plan permite hasta {{max}} en {{o}}. Borra lo que ya no usas, o sube de plan.",
     "planNotFound": "Ese plan no existe.",
-    "planNotSellable": "Ese plan todavía no está listo para la venta. Ya avisamos a soporte."
+    "planNotSellable": "Ese plan todavía no está listo para la venta. Ya avisamos a soporte.",
+    "planSignupDuplicate": "Ya existe una ficha con esos datos. Habla con el gimnasio para continuar.",
+    "planSignupEmail": "Indica tu correo para continuar.",
+    "planSignupName": "Indica tu nombre para continuar.",
+    "planSignupNoOwner": "No pudimos terminar ahora. Habla con el gimnasio.",
+    "planSignupRateLimited": "Demasiados intentos. Inténtalo de nuevo en un rato.",
+    "planSignupStaffEmail": "Ese correo ya pertenece a una cuenta."
   },
   "memberships": {
     "model": {

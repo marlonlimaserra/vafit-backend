@@ -1,6 +1,7 @@
 {
   "customFields": {
     "group": {
+      "endereco": "Address",
       "principal": "Main"
     },
     "native": {
@@ -8,8 +9,19 @@
       "height": "Height (cm)",
       "weight": "Weight (kg)"
     },
+    "seed": {
+      "bairro": "District",
+      "cep": "ZIP code",
+      "cidade": "City",
+      "complemento": "Complement",
+      "cpf": "CPF",
+      "estado": "State",
+      "logradouro": "Street",
+      "numero": "Number"
+    },
     "type": {
       "areaDeTexto": "Text area",
+      "cep": "ZIP code",
       "cnpj": "CNPJ",
       "cpf": "CPF",
       "data": "Date",

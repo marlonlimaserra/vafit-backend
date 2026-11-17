@@ -37,7 +37,11 @@ ReqProtected.prototype.verify = async function (req, res) {
   const tokenDoCabecalho = this.app.helpers.authSession.tokenDe(req);
   const guardado = tokenDoCabecalho ? await sessaoGuardada.ler(tokenDoCabecalho) : null;
 
-  if (guardado) {
+  // `appBloqueado` tranca na BORDA, não só no login: sem isto a sessão de quem
+  // foi bloqueado seguia válida por até 30 dias. O cache é esquecido no ATO do
+  // bloqueio (ver updateStudent/revokeStudentAccess), então um acerto aqui já
+  // não traz bloqueado — a guarda é defesa em profundidade, barata.
+  if (guardado && guardado.appBloqueado !== true) {
     req._user = guardado;
     req._token = tokenDoCabecalho;
     return req._user;
@@ -48,8 +52,10 @@ ReqProtected.prototype.verify = async function (req, res) {
 
   const user = await this.app.api.user.data(session.user);
 
-  // Valid token pointing at a removed/disabled user: drop the session.
-  if (!user || user.active === 0) {
+  // Valid token pointing at a removed/disabled/BLOCKED user: drop the session.
+  // `appBloqueado` é a trava de acesso ao app da pessoa — bloquear tem de valer
+  // para a sessão que ela JÁ tinha aberta, não só impedir um login novo.
+  if (!user || user.active === 0 || user.appBloqueado === true) {
     await this.app.api.auth.deleteToken(session.token);
     res.status(401).send({ msg: req.t("errors.unavailableAccount") });
     return false;

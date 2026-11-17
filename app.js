@@ -345,7 +345,7 @@ const servir = async () => {
 };
 
 clusterLib.start({
-  nome: "gofitnow",
+  nome: "vafit",
   preparar,
   servir,
   // O primário é o dono do contador de limite de chamadas: um por worker faria o

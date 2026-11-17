@@ -19,6 +19,14 @@
       "text": "{{name}}, {{person}} marcou {{service}} para {{when}}. Contato: {{contact}}. Abra a agenda: {{url}}",
       "title": "{{name}}, entrou um horário na sua agenda"
     },
+    "chargeLink": {
+      "subject": "Sua cobrança de {{valor}} — {{casa}}",
+      "title": "Olá, {{name}}!",
+      "body": "Segue o link para pagar a cobrança de <strong>{{valor}}</strong>{{descricao}}.<br><br>Vencimento: <strong>{{vencimento}}</strong><br><br>No botão abaixo você escolhe como pagar — pix, boleto ou cartão.",
+      "button": "Pagar agora",
+      "footer": "Já pagou? Então pode ignorar este e-mail: a baixa entra sozinha.",
+      "text": "{{name}}, segue o link para pagar {{valor}}, com vencimento em {{vencimento}}: {{url}}"
+    },
     "deletion": {
       "body": "Alguém pediu, de dentro da sua conta, para excluí-la. <strong>Nada foi apagado.</strong> Vamos entrar em contato para entender o que aconteceu e combinar os próximos passos — se você quiser mesmo sair, a gente cuida disso com você.<br><br><strong>Se não foi você que pediu</strong>, cancele o pedido no endereço abaixo e troque sua senha.",
       "button": "Ver ou cancelar o pedido",
@@ -43,6 +51,30 @@
       "text": "{{name}}, {{trainerName}} liberou seu acesso ao VAFIT.\n\nEntre em {{url}} com o e-mail {{email}} e a senha combinada com {{trainerName}}.\n\nNão sabe a senha? Use \"Esqueci minha senha\" na tela de login.",
       "title": "{{name}}, seu acesso está liberado"
     },
+    "planUnit": {
+      "subject": "Nova matrícula pela vitrine: {{plano}}",
+      "title": "{{person}} assinou o {{plano}}",
+      "body": "Entrou uma matrícula pela vitrine, na unidade <strong>{{unidade}}</strong>.<br><br>Nome: <strong>{{person}}</strong><br>CPF: {{cpf}}<br>WhatsApp: {{whatsapp}}<br>E-mail: {{contact}}<br>Plano: <strong>{{plano}}</strong> — {{valor}}",
+      "button": "Abrir a ficha",
+      "footer": "A mensalidade já está no financeiro desta pessoa. A cobrança aparece quando você abrir o Financeiro.",
+      "text": "{{person}} assinou o {{plano}} ({{unidade}}). CPF {{cpf}}, WhatsApp {{whatsapp}}, e-mail {{contact}}. Valor {{valor}}. Abra: {{url}}"
+    },
+    "planWelcome": {
+      "subject": "Sua matrícula no {{plano}} está criada",
+      "title": "Obrigado, {{name}}!",
+      "body": "Sua matrícula no <strong>{{plano}}</strong> foi criada na unidade <strong>{{unidade}}</strong>.<br><br>Valor: <strong>{{valor}}</strong><br><br>A academia vai falar com você sobre o pagamento e os próximos passos.",
+      "button": "Falar com a academia",
+      "footer": "Se não foi você quem se matriculou, responda este e-mail e a gente desfaz.",
+      "text": "{{name}}, sua matrícula no {{plano}} ({{unidade}}) foi criada. Valor: {{valor}}. A academia vai falar com você sobre o pagamento."
+    },
+    "planWelcomePay": {
+      "body": "Sua matrícula no <strong>{{plano}}</strong> foi criada na unidade <strong>{{unidade}}</strong>.<br><br>Valor: <strong>{{valor}}</strong><br>Vencimento: <strong>{{vencimento}}</strong><br><br>Falta só o pagamento. No botão abaixo você escolhe como pagar — pix, boleto ou cartão.",
+      "button": "Pagar agora",
+      "footer": "Se não foi você quem se matriculou, responda este e-mail e a gente desfaz.",
+      "subject": "Sua matrícula no {{plano}} está criada — falta o pagamento",
+      "text": "{{name}}, sua matrícula no {{plano}} ({{unidade}}) foi criada. Valor: {{valor}}, vencimento {{vencimento}}. Pague em: {{url}}",
+      "title": "Obrigado, {{name}}!"
+    },
     "request": {
       "body": "<strong>{{professionalName}}</strong> ({{professionalEmail}}) quer acompanhar você no VAFIT.<br><br>Se você liberar, essa pessoa passa a ver o seu histórico e a montar planos junto com os outros profissionais que já cuidam de você. Você pode tirar esse acesso quando quiser.<br><br>O link vale por <strong>{{days}} dias</strong>.",
       "button": "Ver e responder o pedido",
@@ -64,6 +96,31 @@
     },
     "timeSheet": {
       "subject": "Sua folha de ponto"
+    },
+    "appointmentDefaultWhat": "Atendimento",
+    "appointmentPerson": {
+      "subject": "Horário confirmado — {{when}}",
+      "title": "{{name}}, seu horário está confirmado",
+      "body": "Está marcado: <strong>{{what}}</strong> com <strong>{{professional}}</strong>.<br><br>Quando: <strong>{{when}}</strong><br>Duração: {{duration}}<br>Onde: {{place}}",
+      "button": "Ver no app",
+      "footer": "O arquivo em anexo coloca este horário na agenda do seu celular. Se não puder ir, avise {{professional}} com antecedência.",
+      "text": "{{name}}, está marcado: {{what}} com {{professional}}, {{when}} ({{duration}}), em {{place}}. Veja no app: {{url}}"
+    },
+    "appointmentPersonNoApp": {
+      "subject": "Horário confirmado — {{when}}",
+      "title": "{{name}}, seu horário está confirmado",
+      "body": "Está marcado: <strong>{{what}}</strong> com <strong>{{professional}}</strong>.<br><br>Quando: <strong>{{when}}</strong><br>Duração: {{duration}}<br>Onde: {{place}}",
+      "button": "Ver no app",
+      "footer": "O arquivo em anexo coloca este horário na agenda do seu celular. Se não puder ir, avise {{professional}} com antecedência.",
+      "text": "{{name}}, está marcado: {{what}} com {{professional}}, {{when}} ({{duration}}), em {{place}}."
+    },
+    "appointmentProfessional": {
+      "subject": "Marcado: {{person}} — {{when}}",
+      "title": "{{name}}, entrou um horário na sua agenda",
+      "body": "<strong>{{what}}</strong> com <strong>{{person}}</strong>.<br><br>Quando: <strong>{{when}}</strong><br>Duração: {{duration}}<br>Contato: {{contact}}",
+      "button": "Abrir a agenda",
+      "footer": "O arquivo em anexo coloca o horário no seu calendário. Para remarcar ou cancelar, é pela agenda.",
+      "text": "{{name}}, entrou na sua agenda: {{what}} com {{person}}, {{when}} ({{duration}}). Contato: {{contact}}. Abra a agenda: {{url}}"
     }
   }
 }

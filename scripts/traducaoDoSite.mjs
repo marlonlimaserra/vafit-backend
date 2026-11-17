@@ -21,7 +21,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
-const SITE = path.join(AQUI, "..", "..", "gofitnow-frontend", "src", "i18n", "locales");
+const SITE = path.join(AQUI, "..", "..", "vafit-frontend", "src", "i18n", "locales");
 const DESTINO = path.join(AQUI, "..", "lib", "i18n", "documentos");
 
 // As PARTES que um documento usa. `avaliacoes` traz os rótulos das medidas e dos

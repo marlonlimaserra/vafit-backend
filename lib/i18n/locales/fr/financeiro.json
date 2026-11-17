@@ -10,8 +10,21 @@
     "paymentMethodNotFound": "Moyen de paiement introuvable.",
     "paymentMethodSystem": "Les moyens d'origine ne peuvent pas être supprimés — désactivez-le pour le retirer du sélecteur.",
     "paymentNotFound": "Paiement introuvable.",
-    "recurrenceNotFound": "Récurrence introuvable.",
-    "requireAmount": "Indiquez le montant."
+    "recurrenceAmountLocked": "Le montant vient de la formule. Choisissez une formule — ou demandez le droit de définir le montant.",
+    "recurrenceNotFound": "Abonnement introuvable.",
+    "requireAmount": "Indiquez le montant.",
+    "installmentInvalid": "Échelonnement invalide : indiquez le montant total et de 2 à 48 échéances.",
+    "chargeAlreadyAtGateway": "Cette facture a déjà été créée sur la passerelle. Annulez-la là-bas avant d'en créer une autre.",
+    "chargeNotOpen": "Cette facture n'est pas ouverte — il n'y a rien à encaisser.",
+    "chargeGateway": "La passerelle n'a pas accepté la facture.",
+    "chargeNotAtGateway": "Cette facture n'a pas été créée sur la passerelle — rien à rembourser.",
+    "chargeRefund": "La passerelle n'a pas accepté le remboursement.",
+    "chargeNoLink": "Cette facture n'a pas de lien de paiement à envoyer.",
+    "personNoEmail": "Cette personne n'a pas d'e-mail enregistré.",
+    "chargeEmail": "L'e-mail n'a pas pu être envoyé pour le moment.",
+    "chargeHasPayments": "Cette facture a reçu de l'argent. Supprimez le paiement (ou remboursez-le) avant de la retirer.",
+    "chargeGatewayCancel": "La passerelle a refusé d'annuler la facture : la ligne reste donc ouverte ici. Si elle a déjà été payée, la voie est le remboursement.",
+    "chargeGatewayDelete": "La passerelle a refusé de supprimer la facture : la ligne reste donc ici."
   },
   "finance": {
     "every": {
@@ -23,12 +36,29 @@
       "semiannual": "Tous les six mois",
       "weekly": "Hebdomadaire"
     },
+    "gatewayState": {
+      "approved": "Approuvé à l’analyse",
+      "authorized": "Autorisé sur la carte",
+      "refunding": "Remboursement en cours",
+      "refused": "Refusé à l’analyse",
+      "underReview": "En analyse de risque"
+    },
+    "method": {
+      "billet": "Boleto",
+      "cash": "Espèces",
+      "credit": "Carte de crédit",
+      "debit": "Carte de débit",
+      "other": "Autre",
+      "pix": "Pix",
+      "transfer": "Virement"
+    },
     "paymentStatus": {
       "canceled": "Annulé",
       "paid": "Payé",
       "pending": "En attente",
       "refunded": "Remboursé"
     },
+    "recurrenceCanceledAtGateway": "Abonnement annulé chez la passerelle de paiement.",
     "recurrenceStatus": {
       "active": "Active",
       "canceled": "Annulée"
@@ -38,6 +68,14 @@
       "late": "En retard",
       "open": "En attente",
       "paid": "Payée"
+    }
+  },
+  "gatewayLog": {
+    "estado": {
+      "aplicado": "Appliqué",
+      "ignorado": "Sans propriétaire ici",
+      "recusado": "Refusé",
+      "erro": "Erreur de notre côté"
     }
   }
 }

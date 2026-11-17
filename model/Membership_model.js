@@ -72,6 +72,32 @@ const MAX_BENEFICIOS = 60;
 
 // As unidades em que o plano é vendido. Mesmo saneamento da lista de
 // benefícios, e pela mesma razão: id inválido some, repetido entra uma vez.
+// ── AS FORMAS DE PAGAMENTO QUE ESTE PLANO ACEITA ─────────────────────────
+//
+// *"aqui em plano faltou eu escolher as formas de pagamento"* (14/10/2026).
+//
+// Guarda a CHAVE (`pix`, `credit`), e não o id nem o nome: é o que
+// `PaymentMethod_model` promete não mudar nunca — renomear "Boleto" para
+// "Boleto bancário" não pode mexer em plano nenhum.
+//
+// VAZIO quer dizer TODAS as formas ativas da casa, e não "nenhuma". É a mesma
+// leitura de `units` logo abaixo, e pelo mesmo motivo: nenhum plano cadastrado
+// até hoje tem esta lista, e "nenhuma" esvaziaria a vitrine inteira no deploy
+// que criasse o campo.
+function formasDePagamento(v) {
+  if (!Array.isArray(v)) return [];
+
+  const vistas = new Set();
+
+  for (const x of v) {
+    const chave = String(x || "").trim().slice(0, 40);
+    if (chave) vistas.add(chave);
+    if (vistas.size >= 20) break;
+  }
+
+  return [...vistas];
+}
+
 function unidades(v) {
   if (!Array.isArray(v)) return [];
 
@@ -190,6 +216,22 @@ const CAMPOS = {
   // saber de qual unidade a pessoa é para copiar o valor certo — e a
   // recorrência copia o valor no dia em que nasce, de propósito.
   units: unidades,
+  formasDePagamento,
+  // ── GERAR A COBRANÇA NO GATEWAY ─────────────────────────────────────────
+  //
+  // *"coloque uma opção aqui 'Gerar no gateway'; se essa opção tiver marcada,
+  // em vez de falar que a unidade vai entrar em contato, já gera o cadastro
+  // dele no gateway e cria a recorrência direto lá"* (14/10/2026).
+  //
+  // É uma escolha POR PLANO, e não da casa inteira, e isso é o que a torna
+  // útil: a mensalidade do digital se cobra sozinha no pix, e o plano
+  // fechado na recepção continua sendo conversa com o dono. A mesma academia
+  // quer os dois.
+  //
+  // `false` por padrão, e de propósito: o campo nasce em planos que já estão
+  // à venda hoje, e o padrão "liga" faria a próxima pessoa que assinasse
+  // receber um boleto que ninguém mandou emitir.
+  gerarNoGateway: (v) => v === true,
   // O "Mais vantajoso" da vitrine. Mais de um destaque não destaca nada, e quem
   // garante isso é a gravação — ver `insert` e `update`.
   destaque: (v) => v === true,

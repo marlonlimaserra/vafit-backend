@@ -1,6 +1,6 @@
-# GoFitNow — Backend
+# VAFIT — Backend
 
-GoFitNow API (personal trainers and their students). The structure comes from
+VAFIT API (personal trainers and their students). The structure comes from
 `monit-backend`, but this one is **MongoDB only** — no MySQL, Redis, RabbitMQ
 or AWS.
 
@@ -46,7 +46,7 @@ Runs on `179.198.120.67`, served at **https://backend.gofitnow.fit**.
 ```
 /opt/gofitnow-backend            code
 /opt/gofitnow-backend/.env       MONGODB_URI only (chmod 600)
-gofitnow-backend.service         systemd, user `gofitnow` (no shell)
+vafit-backend.service         systemd, user `gofitnow` (no shell)
 /etc/nginx/sites-available/backend.gofitnow.fit
 ```
 
@@ -55,8 +55,8 @@ the Mongo URL. Node listens on `127.0.0.1:3030`, so the port is unreachable
 from the internet; nginx is what answers.
 
 ```bash
-systemctl status gofitnow-backend      # state
-journalctl -u gofitnow-backend -f      # logs
+systemctl status vafit-backend      # state
+journalctl -u vafit-backend -f      # logs
 gofitnow-deploy                        # git pull + install + restart
 gofitnow-deploy --status               # which commit is live
 ```

@@ -16,7 +16,9 @@ const INSTANCIA = "marlon";
 // `limites` é o que o central responderia sobre o plano deste cliente.
 // `undefined` é o caso de quem não tem plano nenhum — e é o padrão, porque foi
 // assim que a rota viveu até o limite existir.
-function monta({ imagem, quantas = 0, viaApiKey = false, limites } = {}) {
+// `permissoes`: o que a conta logada pode. O padrão é quem cuida da
+// Aparência (`users.manage`) — subir imagem de marca passou a exigir isso.
+function monta({ imagem, quantas = 0, viaApiKey = false, limites, permissoes = ["users.manage"] } = {}) {
   const salvas = [];
 
   const app = fakeApp({
@@ -28,6 +30,14 @@ function monta({ imagem, quantas = 0, viaApiKey = false, limites } = {}) {
           // arreio não passa por ele.
           req.instance = INSTANCIA;
           return USER;
+        },
+        async can(req, res, permissao) {
+          const user = await this.verify(req, res);
+          if (!permissoes.includes(permissao)) {
+            res.status(403).send({ msg: "noPermission", permission: permissao });
+            return false;
+          }
+          return user;
         },
       },
     },
@@ -318,4 +328,16 @@ test("não pede sessão — ela aparece em folha aberta por link", async () => {
 
   const r = await call(app, "get", "/public/logo.png");
   assert.equal(r.status, 200);
+});
+
+// "O aluno consegue mexer no sistema?" (16/11/2026). Subir imagem de marca
+// bastava estar logado — e ela fica pública no endereço da casa.
+test("quem não cuida da Aparência não sobe imagem de marca — e nada é guardado", async () => {
+  const { app, salvas } = monta({ permissoes: [] });
+
+  const r = await call(app, "post", "/me/brand/image", { body: { image: PNG } });
+
+  assert.equal(r.status, 403);
+  assert.equal(r.body.permission, "users.manage");
+  assert.equal(salvas.length, 0);
 });

@@ -44,5 +44,21 @@ FoodImage_model.prototype.byKey = async function (key) {
   return (await col.findOne({ key: chave })) || undefined;
 };
 
+// A chave que um NOME de alimento TERIA no catálogo — o "caminho de trás".
+//
+// Um alimento gravado dentro de uma refeição guarda uma CÓPIA do catálogo, e a
+// chave da foto (`imageKey`) é copiada no momento em que ele entra. Planos
+// gerados (IA) e planos antigos foram gravados SEM essa chave: o alimento tem só
+// o nome. Mas o nome dele É o rótulo do catálogo, e `slug(rótulo)` é a chave —
+// então "Couve refogada" acha `couve-refogada` sozinho.
+//
+// É a MESMA adivinhação que a tela da dieta faz (`chaveDaFoto`, `adivinhar:true`
+// em views/student/diets/nutricao.js). Ela só é segura porque `byKey` casa a
+// chave exata ou devolve nada: nome que não existe no catálogo ("Abacate cru" →
+// "abacate-cru") não aponta para foto alheia, aponta para foto nenhuma.
+FoodImage_model.prototype.chaveDoNome = function (nome) {
+  return slug(nome);
+};
+
 module.exports = FoodImage_model;
 module.exports.slug = slug;

@@ -51,6 +51,13 @@ function monta({ vinculado = true } = {}) {
     { _id: new ObjectId(), student: OUTRA_PESSOA, trainer: TRAINER, name: "De outra pessoa" },
   ]);
 
+  // O LEITOR DA PORTA. Ele guarda o que foi pedido, não o que aconteceu: o
+
+  // comando vai para uma fila e o aparelho o busca no próximo ciclo.
+
+  const dispositivo = { revogados: [], async revogarAcesso(pessoa) { this.revogados.push(String(pessoa)); return []; } };
+
+
   const link = {
     apagados: [],
     async exists() {
@@ -62,8 +69,15 @@ function monta({ vinculado = true } = {}) {
     },
   };
 
+  // Os DIAS de treino concluído (16/11/2026): dado da pessoa, saem junto.
+  const feitos = fakeCollection([
+    { _id: new ObjectId(), student: PESSOA, workout: new ObjectId(), day: "2026-11-16" },
+    { _id: new ObjectId(), student: OUTRA_PESSOA, workout: new ObjectId(), day: "2026-11-16" },
+  ]);
+
   const workout = new Workout_model({});
   workout.workoutsCollection = async () => workouts;
+  workout.logsCollection = async () => feitos;
 
   // Os planos alimentares saem junto desde 13/08/2026, pelo mesmo motivo dos
   // treinos: sem isso ficariam apontando para um `student` apagado.
@@ -149,7 +163,7 @@ function monta({ vinculado = true } = {}) {
   const app = {
     api: {
       link, workout, diet, anamnesis, anamnesisLink, supplement, exam, prescription, assessment,
-      assessmentPhoto, chat, appointment, finance,
+      assessmentPhoto, chat, appointment, finance, dispositivo,
     },
   };
   const user = new User_model(app);
@@ -159,7 +173,9 @@ function monta({ vinculado = true } = {}) {
   return {
     user,
     users,
+    dispositivo,
     workouts,
+    feitos,
     link,
     diet,
     anamnesis,
@@ -174,6 +190,37 @@ function monta({ vinculado = true } = {}) {
     finance,
   };
 }
+
+// ── A CATRACA TEM DE PARAR DE GIRAR ─────────────────────────────────────
+//
+// *"eu deletei o meu aluno, e mesmo assim a catraca continua liberando"*
+// (14/10/2026). A cascata derrubava quinze coleções e não falava com o leitor
+// — e quem decide abrir a porta é ELE, com o cadastro dele.
+//
+// É o pior formato de defeito deste produto: silencioso, físico e do lado de
+// fora. Não aparece em tela nenhuma; aparece na catraca girando para quem não
+// é mais aluno.
+//
+// Estes dois testes existem porque a cascata CRESCE: toda tela nova
+// acrescenta uma linha ali, e a que some é sempre a que ninguém cobrou.
+test("apagar a pessoa REVOGA o acesso dela no leitor da porta", async () => {
+  const { user, dispositivo } = monta();
+
+  await user.deleteStudent(TRAINER, PESSOA);
+
+  assert.deepEqual(dispositivo.revogados, [String(PESSOA)]);
+});
+
+test("e quem apaga a PRÓPRIA conta também sai da porta", async () => {
+  // `apagarTudoDoAluno` tem dois chamadores, e foi extraída justamente para
+  // que nenhum dos dois esquecesse uma coleção. Quem pediu para sair tem
+  // ainda mais direito de sumir do aparelho da parede.
+  const { user, dispositivo } = monta();
+
+  await user.apagarTudoDoAluno(PESSOA);
+
+  assert.deepEqual(dispositivo.revogados, [String(PESSOA)]);
+});
 
 test("apaga a pessoa, os vínculos, os treinos, os planos e as avaliações", async () => {
   const {
@@ -256,13 +303,17 @@ test("id inválido não chega a tocar no banco", async () => {
 });
 
 test("deleteAllOfStudent devolve quantos apagou e ignora id inválido", async () => {
-  const { workouts } = monta();
+  const { workouts, feitos } = monta();
   const workout = new Workout_model({});
   workout.workoutsCollection = async () => workouts;
+  workout.logsCollection = async () => feitos;
 
   assert.equal(await workout.deleteAllOfStudent("não-é-id"), 0);
   assert.equal(workouts.docs.length, 3);
 
   assert.equal(await workout.deleteAllOfStudent(PESSOA), 2);
   assert.equal(workouts.docs.length, 1);
+  // E os dias de treino concluído dela foram junto — os da outra pessoa ficam.
+  assert.equal(feitos.docs.length, 1);
+  assert.equal(String(feitos.docs[0].student), String(OUTRA_PESSOA));
 });

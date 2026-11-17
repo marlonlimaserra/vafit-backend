@@ -9,6 +9,10 @@
         "title": {
           "hint": "Ej.: Entrenamiento, Consulta",
           "label": "Tipo de cita"
+        },
+        "minutes": {
+          "label": "Duración de la cita (min)",
+          "hint": "Ej.: 50"
         }
       },
       "assessment": {

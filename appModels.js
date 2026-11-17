@@ -5,7 +5,7 @@ const models = {};
 // que existe mais de um cliente.
 models.center = require("./model/Center_model.js");
 models.affiliate = require("./model/Affiliate_model.js");
-// O suporte que este cliente RECEBE da GoFitNow — chamados, perguntas
+// O suporte que este cliente RECEBE da VAFIT — chamados, perguntas
 // frequentes e o WhatsApp de quem atende. Tudo mora no central.
 models.support = require("./model/Support_model.js");
 // As ideias: sugeridas e votadas aqui, respondidas no painel. Como o suporte,
@@ -120,6 +120,21 @@ models.groupClassImage = require("./model/GroupClassImage_model.js");
 models.groupClassSession = require("./model/GroupClassSession_model.js");
 // As formas de pagamento de cada conta. Eram uma lista fixa dentro do financeiro.
 models.paymentMethod = require("./model/PaymentMethod_model.js");
+// O GATEWAY que a casa ligou para cobrar os alunos dela — Asaas, Pagar.me.
+// Não confundir com `paymentMethod`, que é o catálogo de COMO o dinheiro
+// entrou ("Pix", "Dinheiro"): aquele descreve o passado, este gera a cobrança.
+models.paymentGateway = require("./model/PaymentGateway_model.js");
+// Quem FALA com o gateway em nome de uma matrícula: abre o cliente, abre a
+// assinatura, guarda os ids, e entende o aviso que volta pelo webhook. Separado
+// de `paymentGateway` porque aquele guarda a credencial e este a gasta.
+models.cobrador = require("./model/Cobrador_model.js");
+// O diário dos avisos do gateway: o que chegou pelo webhook e o que foi feito
+// com cada um. É a tela de depuração de Configurações — ver o modelo.
+models.avisoDoGateway = require("./model/AvisoDoGateway_model.js");
+// O CARTÃO que o aluno deixou guardado para as faturas da casa. Aqui não mora
+// cartão nenhum: mora o token do gateway mais os quatro últimos dígitos. Ao
+// lado do cobrador porque é ele quem gasta o token.
+models.cartaoSalvo = require("./model/CartaoSalvo_model.js");
 models.availability = require("./model/Availability_model.js");
 models.bookingPage = require("./model/BookingPage_model.js");
 models.food = require("./model/Food_model.js");
@@ -136,6 +151,7 @@ models.lead = require("./model/Lead_model.js");
 models.customField = require("./model/CustomField_model.js");
 models.customFieldGroup = require("./model/CustomFieldGroup_model.js");
 models.departamento = require("./model/Departamento_model.js");
+models.abaDoPainel = require("./model/AbaDoPainel_model.js");
 models.link = require("./model/Link_model.js");
 models.actionHistory = require("./model/ActionHistory_model.js");
 models.workoutTemplate = require("./model/WorkoutTemplate_model.js");
@@ -161,6 +177,9 @@ models.brandImage = require("./model/BrandImage_model.js");
 // `Oauth_model.js`, de onde os dois herdam.
 models.oauthGoogle = require("./model/OauthGoogle_model.js");
 models.oauthFacebook = require("./model/OauthFacebook_model.js");
+// A Apple (16/11/2026): o terceiro provedor, obrigatório pela diretriz 4.8 da
+// App Store para quem oferece o do Google no app.
+models.oauthApple = require("./model/OauthApple_model.js");
 // O Instagram NÃO é um "entrar com": é conectar a conta de quem já está
 // dentro. Herda do mesmo `Oauth_model` porque o bilhete de ida e volta é o
 // mesmo problema — o que muda é tudo depois do código. Ver o cabeçalho dele.

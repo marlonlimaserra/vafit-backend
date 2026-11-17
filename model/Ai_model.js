@@ -42,7 +42,7 @@ Ai_model.prototype.ownerId = async function () {
 // A chave NUNCA volta inteira para a tela. Só o bastante para quem configurou
 // reconhecer qual é — que é a única pergunta que a tela precisa responder.
 //
-// Ao contrário das chaves de API do próprio GoFitNow, esta é guardada como veio:
+// Ao contrário das chaves de API da própria VAFIT, esta é guardada como veio:
 // ela precisa ser ENVIADA para a Anthropic a cada chamada, e um hash não pode
 // ser desfeito. Por isso ela não sai daqui em resposta nenhuma.
 Ai_model.prototype.hint = function (key) {

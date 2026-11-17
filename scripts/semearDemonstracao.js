@@ -282,7 +282,7 @@ function diaISO(d) {
     const catalogo = await central
       .collection("exercises")
       .find({ instance: null, active: { $ne: 0 } })
-      .project({ name: 1, muscleGroup: 1, thumbUrl: 1, videoUrl: 1, nameSort: 1 })
+      .project({ name: 1, muscleGroup: 1, clipSlug: 1, nameSort: 1 })
       .toArray();
 
     // ── QUAL DOS 1.468 ENTRA NA FOTO ──────────────────────────────────────
@@ -309,8 +309,8 @@ function diaISO(d) {
       if (!candidatos.length) return null;
 
       candidatos.sort((a, b) => {
-        const temA = a.thumbUrl || a.videoUrl ? 0 : 1;
-        const temB = b.thumbUrl || b.videoUrl ? 0 : 1;
+        const temA = a.clipSlug ? 0 : 1;
+        const temB = b.clipSlug ? 0 : 1;
         if (temA !== temB) return temA - temB;
         return nome(a).length - nome(b).length;
       });
@@ -347,8 +347,6 @@ function diaISO(d) {
           exerciseId: e._id,
           name: e.name,
           muscleGroup: e.muscleGroup || "",
-          thumbUrl: e.thumbUrl || null,
-          videoUrl: e.videoUrl || null,
           sets: series.map(([quantity, load]) => ({
             unit: "reps", quantity, load, rest: "60", restMax: "90",
           })),

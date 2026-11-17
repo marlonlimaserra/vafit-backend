@@ -1,7 +1,7 @@
 {
-  "name": "gofitnow-backend",
+  "name": "vafit-backend",
   "version": "0.1.0",
-  "description": "API do GoFitNow — personal trainers e alunos",
+  "description": "API do VAFIT — personal trainers e alunos",
   "main": "app.js",
   "scripts": {
     "start": "WORKERS=1 nodemon app.js",

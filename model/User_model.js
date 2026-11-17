@@ -1,4 +1,5 @@
 const sessaoGuardada = require("../lib/sessaoGuardada.js");
+const cpf = require("../lib/cpf.js");
 const telefones = require("../lib/telefone.js");
 const { ObjectId } = require("mongodb");
 const condicoes = require("../lib/condicoes");
@@ -6,6 +7,7 @@ const nomeDaPessoa = require("../lib/nomeDaPessoa.js");
 const permissionCatalog = require("../lib/permissions.js");
 const instanceContext = require("../lib/instance.js");
 const tempo = require("../lib/tempo.js");
+const lenteDeUnidade = require("../lib/lenteDeUnidade.js");
 const { porPagina } = require("../lib/tetoDaLista.js");
 
 // The `users` collection — every person in the system.
@@ -213,6 +215,7 @@ const USERNAME_RESERVADOS = new Set([
   "suporte",
   "support",
   "gofitnow",
+  "vafit",
   "sistema",
   "system",
   "app",
@@ -305,7 +308,7 @@ User_model.prototype.contactsByIds = async function (ids) {
     .toArray();
 
   return new Map(
-    docs.map((d) => [String(d._id), { name: d.name, email: d.email || "", phone: d.phone || "" }])
+    docs.map((d) => [String(d._id), { name: d.name, email: d.email || "", phone: d.phone || "" }]),
   );
 };
 
@@ -331,7 +334,79 @@ User_model.prototype.briefByIds = async function (ids) {
     docs.map((d) => [
       String(d._id),
       { name: d.name, avatarAt: d.avatarAt || null, bio: d.bio || "" },
-    ])
+    ]),
+  );
+};
+
+// Quais campos do auto preencher já receberam os valores padrão desta conta
+// (ver AutoFill_model.semear). `$addToSet`: marcar duas vezes não duplica.
+User_model.prototype.marcarAutoFillSemeado = async function (id, chaves) {
+  if (!ObjectId.isValid(id) || !chaves?.length) return;
+  // Limpa a sessão guardada como toda escrita em `users` (ver
+  // test/lib/sessaoNaoEnvelhece.test.js). A semeadura nem lê a marca da
+  // sessão — lê do banco —, mas a regra é uma só, sem exceção por esperteza.
+  await sessaoGuardada.esquecerUsuario(id);
+  const col = await this.collection();
+  await col.updateOne(
+    { _id: new ObjectId(id) },
+    { $addToSet: { autoFillSemeado: { $each: chaves.map(String) } } }
+  );
+};
+
+// A FICHA CURTA de várias pessoas de uma vez — o que a aba "Compromissos" da
+// agenda mostra em cada linha: *"quero ver em forma de lista nome foto dados do
+// cliente etc... para eu não ter que ficar procurando no calendário"*.
+//
+// Separada do `briefByIds` porque aquele desenha a GRADE, onde só cabe o nome, e
+// é lido a cada semana aberta; carregar telefone e e-mail ali seria mandar
+// contato para uma tela que não o mostra.
+//
+// Devolve o CONTATO junto, sempre. Quem decide se ele sai para a tela é a rota,
+// pela permissão de quem pede — a regra de acesso fica onde está o pedido, e
+// não escondida num parâmetro deste método.
+User_model.prototype.fichasDaAgendaByIds = async function (ids) {
+  const validos = [...new Set((ids || []).map(String))]
+    .filter((id) => ObjectId.isValid(id))
+    .map((id) => new ObjectId(id));
+
+  if (!validos.length) return {};
+
+  const col = await this.collection();
+  const docs = await col
+    .find(
+      { _id: { $in: validos } },
+      {
+        projection: {
+          name: 1,
+          avatarAt: 1,
+          phone: 1,
+          email: 1,
+          unit: 1,
+          goal: 1,
+          birthDate: 1,
+          sex: 1,
+          active: 1,
+        },
+      },
+    )
+    .toArray();
+
+  return Object.fromEntries(
+    docs.map((d) => [
+      String(d._id),
+      {
+        _id: d._id,
+        name: d.name || "",
+        avatarAt: d.avatarAt || null,
+        phone: d.phone || "",
+        email: d.email || "",
+        unit: d.unit || null,
+        goal: d.goal || "",
+        birthDate: d.birthDate || "",
+        sex: d.sex || "",
+        active: d.active !== 0,
+      },
+    ]),
   );
 };
 
@@ -563,6 +638,31 @@ User_model.prototype.countTrainers = async function () {
 // How many ACTIVE accounts can still hand permissions out. Used to stop the
 // last one from demoting or deleting themself and leaving the platform with
 // no way back into the permission screens.
+// ── O PROFISSIONAL A QUEM UM CADASTRO DE FORA PERTENCE ──────────────────
+//
+// A vitrine cria gente sem ninguém logado, e todo aluno precisa de um
+// profissional: é o VÍNCULO que o faz aparecer em "Alunos". Sem dono, o
+// cadastro nasce e não existe para ninguém — foi o que aconteceu em
+// 14/10/2026: *"cadastrei de novo, onde deveria aparecer?"*. O aluno estava
+// no banco, ligado a um id que não era de pessoa nenhuma.
+//
+// O MAIS ANTIGO, e não um qualquer: numa academia com três professores, o
+// primeiro cadastrado é quem montou a casa. Ele é o palpite menos errado, e
+// mover o aluno para outro professor depois é um clique.
+//
+// `undefined` quando não há nenhum. Quem chama decide o que fazer — e numa
+// rota pública a resposta certa é recusar, nunca inventar um dono.
+User_model.prototype.profissionalMaisAntigo = async function () {
+  const col = await this.collection();
+
+  const doc = await col.findOne(
+    { type: "trainer" },
+    { projection: { _id: 1 }, sort: { createdAt: 1 } },
+  );
+
+  return doc?._id;
+};
+
 User_model.prototype.countAdmins = async function (ignoreUserId) {
   return await this.app.api.role.countActiveUsersWith("roles.manage", ignoreUserId);
 };
@@ -589,7 +689,10 @@ User_model.prototype.inviteToken = async function (trainerId, { renovar = false 
   if (!ObjectId.isValid(trainerId)) return null;
 
   const col = await this.collection();
-  const dono = await col.findOne({ _id: new ObjectId(trainerId) }, { projection: { inviteToken: 1 } });
+  const dono = await col.findOne(
+    { _id: new ObjectId(trainerId) },
+    { projection: { inviteToken: 1 } },
+  );
   if (!dono) return null;
 
   if (dono.inviteToken && !renovar) return dono.inviteToken;
@@ -599,7 +702,7 @@ User_model.prototype.inviteToken = async function (trainerId, { renovar = false 
   const token = this.app.crypto.randomBytes(24).toString("base64url");
   await col.updateOne(
     { _id: new ObjectId(trainerId) },
-    { $set: { inviteToken: token, updatedAt: new Date() } }
+    { $set: { inviteToken: token, updatedAt: new Date() } },
   );
 
   return token;
@@ -625,7 +728,7 @@ User_model.prototype.trainerByInviteToken = async function (token) {
 //
 // O que obriga a ser agregação, e não um `find().sort().skip().limit()`:
 // `active` e `notes` moram no VÍNCULO (professional_links), não na pessoa, e
-// `hasAccess` é derivado da existência de senha. Ordenar ou filtrar por eles
+// `hasAccess` é derivado (senha E não bloqueado). Ordenar ou filtrar por eles
 // exige que existam antes do `$sort` — daí o `$lookup` e o `$addFields`.
 const ORDEM_PESSOAS = {
   name: "name",
@@ -809,12 +912,7 @@ User_model.prototype.pageStudents = async function (trainerId, filtros = {}) {
   const agora = new Date();
   const ctx = { hoje: agora, dia: agora.toISOString().slice(0, 10) };
 
-  const avancado = condicoes.traduzir(
-    filtros.condicoes,
-    await this.fusoDaConta(),
-    geradas,
-    ctx
-  );
+  const avancado = condicoes.traduzir(filtros.condicoes, await this.fusoDaConta(), geradas, ctx);
 
   // ── AS JUNÇÕES QUE A ÁRVORE PEDE ─────────────────────────────────────
   //
@@ -893,9 +991,60 @@ User_model.prototype.pageStudents = async function (trainerId, filtros = {}) {
   ];
 
   // `hasAccess` fica sempre antes: é campo de ordenação e não custa nada — sai
-  // de um `$cond` no próprio documento, sem junção.
+  // do próprio documento, sem junção.
+  //
+  // ── ELE PRECISA CASAR COM `filter()`, E NÃO CASAVA (12/11/2026) ─────────
+  //
+  // *"tirei o acesso, ali aparece app revogado, e mesmo assim aparece app
+  // liberado"*.
+  //
+  // Aqui estava só `tem senha?`. Mas revogar NÃO apaga a senha — liga
+  // `appBloqueado` e deixa a senha onde está, de propósito, para quem volta não
+  // precisar de senha nova (ver `revokeStudentAccess`). Para esta agregação,
+  // então, revogar não mudava nada.
+  //
+  // A ficha mostrava certo porque passa por `filter()`, que faz
+  // `!!password && !doc.appBloqueado`. Eram duas definições do mesmo campo em
+  // lugares diferentes — e a que vazou foi a da lista, que é a que todo mundo
+  // olha primeiro.
+  //
+  // O estrago ia além do selo, e é o que faz isto valer um conserto e não um
+  // remendo na tela: o FILTRO "só quem entra no app" e o "iniciar uma conversa"
+  // leem este mesmo campo. Os dois ofereciam conversa com quem fora revogado.
+  //
+  // `$ne: [..., true]` e não `$eq: [..., false]`: ficha antiga não tem o campo,
+  // e ausência é NÃO bloqueado. Ler a ausência como bloqueio esconderia a base
+  // inteira no dia do deploy — a mesma regra de `passagemLiberada`.
+  //
+  // ── E `temSenha` VEM JUNTO, pelo mesmo motivo (12/11/2026) ─────────────
+  //
+  // *"não quero ter que digitar senha toda vez que eu bloquear o acesso, se ele
+  // já tem senha, mantenha a senha"*.
+  //
+  // O servidor já guardava a senha ao bloquear — quem some é o `hasAccess`. O
+  // que faltava era a LISTA saber distinguir "não entra porque foi bloqueado"
+  // de "não entra porque nunca teve senha": os dois chegavam como
+  // `hasAccess: false` e a tela, sem mais nada para olhar, pedia senha nos
+  // dois casos.
+  //
+  // `temSenha` existia só em `filter()`, que serve a ficha — e é por isso que
+  // a FICHA já fazia certo desde outubro e a lista não. Mesma raiz do selo
+  // mentiroso acima: a ficha passa por `filter()`, a lista não passa por nada.
+  //
+  //   temSenha   tem COM O QUÊ entrar
+  //   hasAccess  está entrando agora
+  //
+  // A diferença entre os dois é exatamente o bloqueio.
   etapas.push({
-    $addFields: { hasAccess: { $cond: [{ $ifNull: ["$password", false] }, true, false] } },
+    $addFields: {
+      temSenha: { $cond: [{ $ifNull: ["$password", false] }, true, false] },
+      hasAccess: {
+        $and: [
+          { $cond: [{ $ifNull: ["$password", false] }, true, false] },
+          { $ne: ["$appBloqueado", true] },
+        ],
+      },
+    },
   });
 
   // SÓ QUEM ENTRA NO APP.
@@ -965,7 +1114,7 @@ User_model.prototype.pageStudents = async function (trainerId, filtros = {}) {
           treinosEmDia: { $ifNull: [{ $arrayElemAt: ["$treinos.emDia", 0] }, 0] },
         },
       },
-      { $match: FILTROS_DE_TREINO[filtros.workout] }
+      { $match: FILTROS_DE_TREINO[filtros.workout] },
     );
   }
 
@@ -994,7 +1143,11 @@ User_model.prototype.pageStudents = async function (trainerId, filtros = {}) {
 
   // `exportando` só chega de dentro do servidor (o registro de listas), nunca
   // da query — ver `lib/tetoDaLista.js`.
-  const limite = porPagina(filtros.limit, { padrao: 15, maximo: 200, exportando: filtros.exportando });
+  const limite = porPagina(filtros.limit, {
+    padrao: 15,
+    maximo: 200,
+    exportando: filtros.exportando,
+  });
   const pagina = Math.max(Number(filtros.page) || 1, 1);
 
   etapas.push({
@@ -1185,7 +1338,7 @@ User_model.prototype.updateStudent = async function (trainerId, id, obj) {
   if (obj.name !== undefined || obj.firstName !== undefined || obj.lastName !== undefined) {
     const atual = await col.findOne(
       { _id: new ObjectId(id) },
-      { projection: { name: 1, firstName: 1, lastName: 1 } }
+      { projection: { name: 1, firstName: 1, lastName: 1 } },
     );
     Object.assign(set, nomeDaPessoa.paraGravar(obj, atual || {}));
   }
@@ -1257,6 +1410,12 @@ User_model.prototype.updateStudent = async function (trainerId, id, obj) {
 
   const r = await col.updateOne({ _id: new ObjectId(id) }, update);
 
+  // Bloquear pela ficha (estado) tem de derrubar a sessão aberta, igual ao
+  // botão de revogar. Só quando o bloqueio LIGA: liberar não mexe em token.
+  if (r.matchedCount > 0 && set.appBloqueado === true) {
+    await this.app.api.auth.deleteAllTokensByUser(id);
+  }
+
   return r.matchedCount > 0;
 };
 
@@ -1286,6 +1445,21 @@ User_model.prototype.deleteStudent = async function (trainerId, id) {
 User_model.prototype.apagarTudoDoAluno = async function (id) {
   await sessaoGuardada.esquecerUsuario(id);
   if (!ObjectId.isValid(id)) return false;
+
+  // ── A PORTA VEM ANTES DO BANCO ────────────────────────────────────────
+  //
+  // *"eu deletei o meu aluno, e mesmo assim a catraca continua liberando"*
+  // (14/10/2026). Esta cascata derrubava quinze coleções e não falava com o
+  // leitor — e quem decide abrir a porta é ELE, com o cadastro dele.
+  //
+  // Antes do `deleteOne`, e não depois, porque o comando para o aparelho sai
+  // do VÍNCULO (que número esta pessoa tem lá dentro). Apagada a pessoa, o
+  // vínculo some junto e não há mais a quem mandar tirar.
+  //
+  // Aqui e não no controller: esta cascata tem dois chamadores — a casa
+  // apagando o aluno e a própria pessoa apagando a conta dela. Quem sai por
+  // vontade própria tem ainda mais direito de sumir do aparelho da parede.
+  await this.app.api.dispositivo.revogarAcesso(id);
 
   const col = await this.collection();
   const r = await col.deleteOne({ _id: new ObjectId(id) });
@@ -1326,8 +1500,13 @@ User_model.prototype.revokeStudentAccess = async function (trainerId, id) {
     { _id: new ObjectId(id), createdBy: new ObjectId(trainerId) },
     // A senha FICA. Ver `podeEntrar`: o que tranca é a chave, e é ela que a
     // volta desfaz sem pedir nada a ninguém.
-    { $set: { appBloqueado: true, updatedAt: new Date() } }
+    { $set: { appBloqueado: true, updatedAt: new Date() } },
   );
+  // Derruba a sessão que a pessoa JÁ tinha aberta: bloquear que só impede login
+  // novo deixaria quem está dentro por até 30 dias. A borda também recusa
+  // `appBloqueado` (ver ReqProtected), mas apagar o token encerra na hora, em
+  // todos os aparelhos.
+  if (r.matchedCount > 0) await this.app.api.auth.deleteAllTokensByUser(id);
   return r.matchedCount > 0;
 };
 
@@ -1446,6 +1625,40 @@ User_model.prototype.authenticate = async function (identificador, password) {
   return user;
 };
 
+// ── POR QUE NÃO ENTROU, QUANDO A PROVA ESTAVA CERTA (16/11/2026) ──────────
+//
+// *"tentei logar, ele está bloqueado, mas no app mostra que a senha está
+// errada — deveria mostrar que o acesso foi bloqueado"*.
+//
+// `authenticate` devolve "nada" para senha errada E para conta bloqueada, e a
+// tela só sabia dizer "e-mail ou senha inválidos". A pessoa bloqueada trocava a
+// senha, errava de novo e ligava para a academia achando que esqueceu.
+//
+// O motivo só é revelado DEPOIS de a prova conferir — senha certa aqui, e-mail
+// verificado pelo Google em `motivoDoEmailVerificado`. Sem a senha, ninguém
+// descobre se uma conta existe nem se está bloqueada: a mensagem genérica
+// continua sendo a de quem errou.
+//
+// Devolve "bloqueado", "inativo" ou null (quando não é um desses dois casos).
+function motivoDaRecusa(user) {
+  if (!user || !user.password || !user.salt) return null;
+  if (user.appBloqueado) return "bloqueado";
+  if (user.active === 0) return "inativo";
+  return null;
+}
+
+User_model.prototype.recusaComSenhaCerta = async function (identificador, password) {
+  const user = await this.dataByLogin(identificador);
+  if (!user || !user.password || !user.salt) return null;
+  if (this.hashPassword(password, user.salt) !== user.password) return null;
+  return motivoDaRecusa(user);
+};
+
+// A mesma pergunta para quem provou ser dono do e-mail pelo Google.
+User_model.prototype.motivoDoEmailVerificado = async function (email) {
+  return motivoDaRecusa(await this.dataByEmail(email));
+};
+
 // QUEM pode entrar — independentemente de COMO provou quem é.
 //
 // Isto era um par de `if` dentro de `authenticate`, e saiu de lá quando o login
@@ -1498,8 +1711,132 @@ User_model.prototype.porEmailVerificado = async function (email) {
   return user;
 };
 
-// Numbers for the trainer's dashboard.
-User_model.prototype.studentsSummary = async function (trainerId) {
+// Os números do painel. ELES RESPEITAM A LENTE DA UNIDADE desde 20/10/2026.
+//
+// *"nem leva em consideração a unidade"* — e não levava: os quatro cartões
+// contavam a casa inteira enquanto a lista logo abaixo, na mesma tela, já
+// obedecia ao seletor do menu. Dois números para a mesma pergunta, um ao lado
+// do outro, e o maior deles errado.
+//
+// O recorte é o MESMO de `pageStudents` e pela mesma razão escrita lá: a lente
+// é estrita. Escolher Niterói e continuar vendo 221 não parece cauteloso,
+// parece quebrado.
+//
+// ── E O MÊS COMEÇA NO FUSO DA CASA ──────────────────────────────────────
+//
+// "Novos no mês" comparava com a meia-noite do PROCESSO, que roda em UTC: no
+// dia 1º, até as 21h de Brasília, quem foi cadastrado ontem à noite ainda
+// contava como deste mês. Agora o corte é o mesmo de `periodoDeCadastro`.
+// ── A SÉRIE DE CADASTROS, PARA O GRÁFICO DO PAINEL (22/10/2026) ──────────
+//
+// *"cadê os gráficos?"*. Quantos entraram em cada mês, e quantos a casa tinha
+// no fim de cada um.
+//
+// ── POR QUE SÓ ESTES DOIS NÚMEROS GANHARAM GRÁFICO ───────────────────────
+//
+// Porque são os únicos de pessoas que a HISTÓRIA responde. `createdAt` é um
+// fato datado: "entrou em março" continua verdade para sempre, e somá-lo mês a
+// mês não inventa nada.
+//
+// "Ativo" e "com acesso ao app" são BANDEIRAS DE AGORA — um `active` na ficha,
+// uma senha no documento. Nada no banco diz quantos estavam ativos em março;
+// para saber isso seria preciso ter fotografado a casa todo mês, e ninguém
+// fotografou. Um gráfico de "ativos ao longo do ano" só poderia ser inventado —
+// e número inventado em painel é pior que gráfico ausente, porque ninguém
+// confere o que concorda com a expectativa.
+//
+// Então esses dois cartões ficam sem linha embaixo, de propósito.
+//
+// ── O ACUMULADO SAI DE UMA CONTAGEM SÓ ───────────────────────────────────
+//
+// `total` no fim do mês M = quem entrou até M. Em vez de doze contagens, uma
+// contagem do que havia ANTES da janela mais a soma correndo dos meses dela.
+//
+// Ele conta sobre o mesmo conjunto do cartão (a lista deste profissional,
+// recortada pela unidade) — e tem a mesma lacuna que o cartão: quem foi apagado
+// não está mais aqui, então a curva mostra a casa de hoje olhando para trás, e
+// não a de então. Para uma conta que não apaga gente, são a mesma coisa.
+// ── QUEM ENTROU NUMA JANELA (22/10/2026) ────────────────────────────────
+//
+// A lista por trás da barra "Novos no mês" do gráfico do painel.
+//
+// Mesma base de `studentsSummary` e `serieDeCadastros` — a lista deste
+// profissional, recortada pela unidade —, porque a lista por trás de um número
+// tem de contar a mesma gente que o número.
+User_model.prototype.cadastradosEntre = async function (
+  trainerId,
+  lente = {},
+  janela = {},
+  limite = 50,
+) {
+  const col = await this.collection();
+
+  const ids = await this.app.api.link.personIdsOf(trainerId);
+  if (!ids.length) return { linhas: [], total: 0 };
+
+  const base = {
+    _id: { $in: ids },
+    ...this.recorteDeUnidade(lente),
+    createdAt: { $gte: janela.de, $lte: janela.ate },
+  };
+
+  const [linhas, total] = await Promise.all([
+    col
+      .find(base, { projection: { name: 1, email: 1, createdAt: 1 } })
+      .sort({ createdAt: -1 })
+      .limit(limite)
+      .toArray(),
+    col.countDocuments(base),
+  ]);
+
+  return {
+    linhas: linhas.map((l) => ({
+      id: String(l._id),
+      nome: l.name || "",
+      email: l.email || "",
+      em: l.createdAt,
+    })),
+    total,
+  };
+};
+
+User_model.prototype.serieDeCadastros = async function (trainerId, lente = {}, janela = {}) {
+  const col = await this.collection();
+
+  const ids = await this.app.api.link.personIdsOf(trainerId);
+  if (!ids.length) return [];
+
+  const base = { _id: { $in: ids }, ...this.recorteDeUnidade(lente) };
+  const { de, ate, fuso } = janela;
+
+  const [linhas, antes] = await Promise.all([
+    col
+      .aggregate([
+        { $match: { ...base, createdAt: { $gte: de, $lte: ate } } },
+        {
+          $group: {
+            // `createdAt` é um instante de verdade — o segundo em que alguém
+            // apertou Salvar. Então o mês dele é o mês NO FUSO DA CASA: sem o
+            // `timezone`, um cadastro feito às 22h do dia 31 nasceria no mês
+            // seguinte para quem o fez.
+            _id: { $dateToString: { format: "%Y-%m", date: "$createdAt", timezone: fuso } },
+            novos: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ])
+      .toArray(),
+    col.countDocuments({ ...base, createdAt: { $lt: de } }),
+  ]);
+
+  let correndo = antes;
+  return linhas.map((l) => {
+    correndo += l.novos;
+    return { r: l._id, novos: l.novos, total: correndo };
+  });
+};
+
+User_model.prototype.studentsSummary = async function (trainerId, lente = {}) {
   const col = await this.collection();
 
   const ids = await this.app.api.link.personIdsOf(trainerId);
@@ -1507,21 +1844,56 @@ User_model.prototype.studentsSummary = async function (trainerId) {
     return { total: 0, active: 0, inactive: 0, withAccess: 0, newThisMonth: 0 };
   }
 
-  const base = { _id: { $in: ids } };
+  const base = { _id: { $in: ids }, ...this.recorteDeUnidade(lente) };
 
-  const total = ids.length;
+  // Os ids QUE SOBRARAM do recorte. Antes bastava `ids.length`, porque não
+  // havia recorte nenhum — com a lente, o total é o da unidade e o `active`
+  // precisa ser contado sobre esse mesmo conjunto, senão os dois cartões
+  // falariam de populações diferentes.
+  const doRecorte = await col.distinct("_id", base);
+
   // Ativo aqui é ativo NA LISTA deste profissional, igual ao que a tela mostra
   // — contar pelo `active` da conta daria um número que não bate com a lista.
   const activeMap = await this.app.api.link.activeMap(trainerId);
-  const active = ids.filter((id) => (activeMap.get(String(id)) ?? 1) === 1).length;
+  const active = doRecorte.filter((id) => (activeMap.get(String(id)) ?? 1) === 1).length;
   const withAccess = await col.countDocuments({ ...base, password: { $ne: null } });
 
-  const monthStart = new Date();
-  monthStart.setDate(1);
-  monthStart.setHours(0, 0, 0, 0);
+  const fuso = await this.fusoDaConta();
+  const parede = tempo.paredeDe(new Date(), fuso);
+  const monthStart = tempo.instante({ ano: parede.ano, mes: parede.mes, dia: 1 }, fuso);
   const newThisMonth = await col.countDocuments({ ...base, createdAt: { $gte: monthStart } });
 
+  const total = doRecorte.length;
   return { total, active, inactive: total - active, withAccess, newThisMonth };
+};
+
+// ── O RECORTE DE UNIDADE, numa linha que os dois lados usam ─────────────
+//
+// A LENTE (`unit`) é uma unidade escolhida no menu, e ela é estrita: quem não
+// está nela não aparece. A CERCA (`units`) é o que a pessoa alcança quando é
+// restrita e não escolheu nenhuma, e ela deixa passar quem não tem unidade —
+// alguém "da casa" não é de outra unidade. Ver `lib/lenteDeUnidade.js`.
+User_model.prototype.recorteDeUnidade = function ({ unit, units } = {}) {
+  if (ObjectId.isValid(unit)) return { unit: new ObjectId(String(unit)) };
+  return lenteDeUnidade.filtroDeUnidades(units) || {};
+};
+
+// Destes ids, quais estão na unidade olhada. Sem lente, todos.
+//
+// Existe para o que NÃO guarda unidade própria: um compromisso da agenda é de
+// um profissional e de uma pessoa, e a unidade dele é a de quem vai ser
+// atendido. O painel precisa disso para o dia bater com o seletor do menu.
+User_model.prototype.idsNaUnidade = async function (ids, lente = {}) {
+  const recorte = this.recorteDeUnidade(lente);
+  if (!Object.keys(recorte).length) return ids;
+
+  const alvo = (Array.isArray(ids) ? ids : [])
+    .filter((id) => ObjectId.isValid(id))
+    .map((id) => new ObjectId(String(id)));
+  if (!alvo.length) return [];
+
+  const col = await this.collection();
+  return col.distinct("_id", { _id: { $in: alvo }, ...recorte });
 };
 
 // ── Every user, no scoping — admin only ──────────────────────────────────
@@ -1547,7 +1919,8 @@ User_model.prototype.listAll = async function (filter) {
   if (filter && filter.active !== undefined && filter.active !== "") {
     query.active = Number(filter.active) ? 1 : 0;
   }
-  if (filter && filter.role && ObjectId.isValid(filter.role)) query.role = new ObjectId(filter.role);
+  if (filter && filter.role && ObjectId.isValid(filter.role))
+    query.role = new ObjectId(filter.role);
 
   const docs = await col.find(query).sort({ createdAt: -1 }).toArray();
 
@@ -1753,7 +2126,7 @@ User_model.prototype.exclusaoPedida = async function (user) {
 User_model.prototype.cancelarExclusaoDaConta = async function (user) {
   return await this.app.api.center.cancelarExclusaoPedida(
     instanceContext.required(),
-    String(user._id)
+    String(user._id),
   );
 };
 
@@ -1773,7 +2146,7 @@ User_model.prototype.conferirSenha = async function (id, senha) {
   const col = await this.collection();
   const doc = await col.findOne(
     { _id: new ObjectId(id) },
-    { projection: { password: 1, salt: 1 } }
+    { projection: { password: 1, salt: 1 } },
   );
 
   if (!doc || !doc.password || !doc.salt) return false;
@@ -1810,6 +2183,45 @@ module.exports.TYPES = TYPES;
 // Se já houver duas fichas com o mesmo número — e há, de antes desta regra
 // existir —, vale a mais antiga. É a que tem histórico, e é a escolha que
 // `dataOfInstance` e o importador do Wiki4Fit já fazem nos empates deles.
+// ── QUEM É O DONO DESTE CPF ─────────────────────────────────────────────
+//
+// Nasceu com a assinatura de plano pela vitrine (14/10/2026): o CPF é o que
+// diz "você já é aluno daqui" antes de pedir qualquer outro dado.
+//
+// O valor mora em `customFields.cpf`, porque o CPF é um campo semeado e não
+// uma coluna da pessoa (ver `CustomField_model`). Consulta DIRETA pela chave,
+// e não varredura como a do telefone: ali os formatos divergem ("(11) 9…" vs
+// "119…") e é preciso comparar normalizado um por um; aqui só os DÍGITOS são
+// gravados, sempre, então o índice resolve.
+//
+// Guardar sem pontuação é o que faz esta busca existir: um CPF gravado
+// "111.444.777-35" não casaria com o mesmo CPF digitado sem pontos, e a
+// pessoa viraria dois cadastros.
+User_model.prototype.dataByCpf = async function (valor) {
+  const alvo = cpf.limpar(valor);
+  if (!cpf.valido(alvo)) return undefined;
+
+  const col = await this.collection();
+
+  return (
+    (await col.findOne(
+      // ── SÓ ALUNO ────────────────────────────────────────────────────
+      //
+      // Quem pergunta é a VITRINE, sem sessão. Sem este filtro, o CPF (ou o
+      // e-mail, na segunda chave) casava com a conta do PROFISSIONAL — e foi
+      // o que aconteceu em 14/10/2026: *"me cadastrei... fui em alunos e não
+      // tem nada"*. A mensalidade tinha ido para a conta dele, que não
+      // aparece na lista de alunos porque não é um.
+      //
+      // E o estrago maior era o outro: a rota pública grava o CPF em quem
+      // ela acha. Numa conta de equipe, isso é escrita em dado de staff
+      // vinda de uma página que qualquer um abre.
+      { type: "student", "customFields.cpf": alvo },
+      { projection: { name: 1, phone: 1, email: 1, type: 1, customFields: 1 } },
+    )) || undefined
+  );
+};
+
 User_model.prototype.dataByPhone = async function (telefone) {
   const alvo = telefones.chave(telefone);
   if (!alvo) return undefined;

@@ -1,7 +1,10 @@
 {
   "ok": {
+    "accessDeviceLinked": "Person linked to the reader.",
+    "accessDeviceRemoved": "Reader removed.",
     "accessRevoked": "Access revoked.",
     "apiKeyRevoked": "Key revoked.",
+    "apiKeyToolsSaved": "Key tools saved.",
     "appointmentRemoved": "Appointment removed.",
     "assessmentEmailed": "Assessment sent by email.",
     "assessmentRemoved": "Assessment deleted.",
@@ -42,7 +45,7 @@
     "photoUpdated": "Photo updated.",
     "prescriptionRemoved": "Prescription deleted.",
     "recordRemoved": "Entry deleted.",
-    "recurrenceRemoved": "Recurrence removed. Charges already generated remain.",
+    "recurrenceRemoved": "Subscription removed. Charges already generated remain.",
     "requestCancelled": "Request cancelled.",
     "requestSent": "Request sent. The person has to confirm by e-mail.",
     "resetLinkSent": "If an account exists for that e-mail, the reset link has been sent.",
@@ -53,13 +56,12 @@
     "supplementRemoved": "Supplement deleted.",
     "supplierRemoved": "Supplier removed.",
     "supplyRemoved": "Supply removed.",
+    "tabRemoved": "Tab removed.",
     "templateRemoved": "Template removed.",
     "timeSheetEmailed": "Time sheet emailed.",
     "unitRemoved": "Unit removed.",
     "unitSaved": "Order saved.",
     "userRemoved": "User removed.",
-    "workoutRemoved": "Workout removed.",
-    "accessDeviceRemoved": "Reader removed.",
-    "accessDeviceLinked": "Person linked to the reader."
+    "workoutRemoved": "Workout removed."
   }
 }

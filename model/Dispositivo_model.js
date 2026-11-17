@@ -452,6 +452,21 @@ Dispositivo_model.prototype.perguntarCadastro = async function (id) {
   return objetos.length;
 };
 
+// A releitura ESTREITA: só o que uma chave estrangeira de `user_access_rules`
+// consegue violar. Chamada sozinha pelo servidor quando o aparelho acusa que
+// o usuário ou a regra não existem — ver `guardarResultado`.
+Dispositivo_model.prototype.reperguntarQuemExiste = async function (id) {
+  for (const object of ["users", "access_rules", "portal_access_rules"]) {
+    const ok = await this.enfileirarComando(id, {
+      verb: "POST",
+      endpoint: "load_objects",
+      body: { object },
+    });
+    if (!ok) return false;
+  }
+  return true;
+};
+
 // ── OS AJUSTES DO LEITOR ─────────────────────────────────────────────────
 //
 // *"bote aqui uma aba chamada configurações, a primeira vai ser um checkbox,
@@ -672,6 +687,25 @@ Dispositivo_model.prototype.guardarResultado = async function (dispositivo, resu
   // das continuações: se a saga parar aqui, o motivo já está guardado.
   if (comando) await this.registrarFalha(dispositivo, comando, resultado);
 
+  // ── O VÍNCULO APONTOU PARA O VAZIO: PERGUNTE DE NOVO ─────────────────
+  //
+  // `FOREIGN KEY constraint failed` quer dizer que o usuário, ou a regra, não
+  // existem mais no aparelho — alguém apagou pela tela dele, que é operação
+  // normal e invisível daqui.
+  //
+  // Enquanto a nossa cópia continuar dizendo que existem, toda tentativa de
+  // liberar essa pessoa repete a mesma recusa, e a tela segue oferecendo um
+  // botão que só sabe falhar. A leitura conserta sozinha: `guardarCadastro`
+  // refaz `usuarios`, `regras` e `regraDaPorta`, e é dela que `vinculoMorreu`
+  // precisa para ter coragem de derrubar um vínculo morto.
+  //
+  // São três `load_objects`, e não os sete de "Perguntar ao aparelho": é o
+  // exato conjunto para onde a chave estrangeira aponta. O resto é barulho
+  // numa fila que o aparelho esvazia um comando por vez.
+  if (comando && apontaParaOVazio(comando, lerFalha(resultado))) {
+    await this.reperguntarQuemExiste(dispositivo);
+  }
+
   // O comando tinha bilhete? Então a resposta não é o fim: é o meio.
   if (comando?.prosseguir?.tipo === "cadastro") {
     await this.prosseguirCadastro(dispositivo, comando, resultado);
@@ -761,6 +795,45 @@ function semImagem(body) {
   return copia;
 }
 
+// ── AS DUAS RECUSAS QUE O BANCO DO APARELHO ESCREVE EM SQL ───────────────
+//
+// O iDFace guarda tudo em SQLite e, quando o INSERT bate numa trava, devolve
+// a mensagem do banco crua: "constraint failed: UNIQUE constraint failed:
+// user_access_rules.user_id, user_access_rules.access_rule_id". As duas que
+// aparecem na prática vêm do MESMO comando — ligar alguém à regra da porta —
+// e querem dizer coisas opostas.
+//
+//   UNIQUE      o par (usuário, regra) JÁ EXISTE. O estado que queríamos é o
+//               estado que o aparelho tem. Não há nada a consertar.
+//   FOREIGN KEY o usuário ou a regra NÃO EXISTEM mais lá dentro. Alguém
+//               apagou pela tela do aparelho, e os números que guardamos
+//               apontam para o vazio.
+const UNICIDADE = /UNIQUE constraint failed/i;
+const CHAVE_ESTRANGEIRA = /FOREIGN KEY constraint failed/i;
+
+function ligandoAlguemNaRegra(comando) {
+  return comando?.endpoint === "create_objects" && comando?.body?.object === "user_access_rules";
+}
+
+// ── A RECUSA QUE NÃO É PROBLEMA ──────────────────────────────────────────
+//
+// Pedir de novo o vínculo que já existe acontece o tempo todo, e por motivos
+// legítimos: liberar quem já estava liberado, clicar duas vezes, uma
+// reavaliação de pendência que recalcula o mesmo "pode passar". O aparelho
+// recusa, e a recusa ia para a fila de "alguma coisa não foi aplicada no
+// leitor" — onde ela é MENTIRA: foi aplicada antes, e continua aplicada.
+//
+// Erro que não é erro é pior do que nenhum registro: ele ensina a ignorar a
+// lista, e a próxima recusa de verdade é ignorada junto.
+function recusaInofensiva(comando, falha) {
+  return Boolean(falha) && ligandoAlguemNaRegra(comando) && UNICIDADE.test(falha.mensagem);
+}
+
+// Esta, sim, é problema — e tem conserto automático: ver `guardarResultado`.
+function apontaParaOVazio(comando, falha) {
+  return Boolean(falha) && ligandoAlguemNaRegra(comando) && CHAVE_ESTRANGEIRA.test(falha.mensagem);
+}
+
 Dispositivo_model.prototype.colecaoDeErros = async function () {
   const db = await this.app.mongodb.connectToServer();
   return db.collection("access_device_errors");
@@ -769,6 +842,9 @@ Dispositivo_model.prototype.colecaoDeErros = async function () {
 Dispositivo_model.prototype.registrarFalha = async function (dispositivo, comando, resultado) {
   const falha = lerFalha(resultado);
   if (!falha) return false;
+
+  // Já estava ligado: o aparelho recusou o pedido e concordou com o destino.
+  if (recusaInofensiva(comando, falha)) return false;
 
   const col = await this.colecaoDeErros();
   await col.insertOne({
@@ -813,7 +889,12 @@ Dispositivo_model.prototype.registrarFalha = async function (dispositivo, comand
 function estadoDoComando(c) {
   if (!c?.enviadoEm) return "na_fila";
   if (!c.resultado) return "entregue";
-  return lerFalha(c.resultado) ? "recusado" : "respondido";
+
+  const falha = lerFalha(c.resultado);
+  if (!falha) return "respondido";
+  // "Já existia" é o destino cumprido, não um comando recusado — a fila
+  // mostraria vermelho para um vínculo que está de pé. Ver `recusaInofensiva`.
+  return recusaInofensiva(c, falha) ? "respondido" : "recusado";
 }
 
 Dispositivo_model.prototype.fila = async function (dispositivo) {
@@ -1473,6 +1554,71 @@ Dispositivo_model.prototype.situacaoNaPorta = async function (pessoa) {
 // Devolve uma linha por aparelho, e é o que a tela mostra. NÃO lança: um leitor
 // sem o cadastro lido não pode impedir que o outro seja atualizado, e um erro
 // aqui não pode desfazer a chave que já foi gravada na ficha.
+// ── APAGAR A PESSOA TEM DE APAGÁ-LA DA PORTA ─────────────────────────────
+//
+// *"eu deletei o meu aluno, e mesmo assim a catraca continua liberando"*
+// (14/10/2026). E continuava mesmo: `apagarTudoDoAluno` derrubava quinze
+// coleções e não falava com o leitor. O aparelho decide sozinho quem entra,
+// com o cadastro DELE — ninguém tinha mandado tirar.
+//
+// É o pior formato de defeito que este produto pode ter: silencioso, físico e
+// do lado de fora. Ninguém descobre olhando a tela; descobre vendo a catraca
+// girar para quem não é mais aluno.
+//
+// ── POR QUE DESTRÓI O USUÁRIO, E NÃO SÓ A REGRA ──────────────────────
+//
+// Bloquear (`sincronizarPassagem(…, false)`) apaga só `user_access_rules`: a
+// porta para de abrir e o ROSTO continua gravado no aparelho. Para quem foi
+// bloqueado isso é certo — é uma chave que se desvira amanhã.
+//
+// Para quem foi APAGADO, não: a pessoa pediu para sair, ou a casa a tirou do
+// sistema, e deixar a biometria dela num aparelho na parede é guardar o que
+// ninguém mais tem direito de guardar. O cadastro é desfeito na ordem inversa
+// da que foi feito.
+Dispositivo_model.prototype.revogarAcesso = async function (pessoa) {
+  if (!ObjectId.isValid(pessoa)) return [];
+
+  const aparelhos = await this.listar();
+  const saida = [];
+
+  for (const aparelho of aparelhos) {
+    const usuario = await this.usuarioDaPessoa(aparelho._id, pessoa);
+    // Nunca esteve neste aparelho: não há o que tirar.
+    if (usuario === null) continue;
+
+    try {
+      // A REGRA primeiro. Se o aparelho só aplicar um dos dois comandos, que
+      // seja este: sem a regra ele já não abre, e um rosto sem regra é um
+      // desconhecido. Na ordem inversa, a janela entre os dois é uma janela
+      // em que a catraca ainda gira.
+      await this.bloquearNoAparelho(aparelho._id, usuario, pessoa);
+
+      await this.enfileirarComando(aparelho._id, {
+        verb: "POST",
+        endpoint: "destroy_objects",
+        body: { object: "users", where: { users: { id: usuario } } },
+        pessoa,
+      });
+
+      saida.push({ dispositivo: String(aparelho._id), nome: aparelho.nome || "", usuario });
+    } catch (erro) {
+      // Nunca derruba o apagar. Uma pessoa que não some porque o leitor está
+      // fora do ar é pior que um comando que fica na fila — e ele FICA na
+      // fila: o aparelho o busca no próximo ciclo.
+      console.error("[controlid] revogar acesso:", erro.message);
+      saida.push({ dispositivo: String(aparelho._id), erro: "falhou" });
+    }
+  }
+
+  // O VÍNCULO sai por último, e só depois de os comandos estarem na fila:
+  // é dele que sai o número do usuário no aparelho, e apagá-lo antes deixaria
+  // o comando sem destino — a pessoa sumiria do sistema e continuaria entrando.
+  const vinculos = await this.colecaoDeVinculos();
+  await vinculos.deleteMany({ person: new ObjectId(String(pessoa)) });
+
+  return saida;
+};
+
 Dispositivo_model.prototype.sincronizarPassagem = async function (pessoa, liberado) {
   const aparelhos = await this.listar();
   const saida = [];
@@ -1731,3 +1877,5 @@ module.exports.lerResultadoDaFoto = lerResultadoDaFoto;
 module.exports.lerFalha = lerFalha;
 module.exports.estadoDoComando = estadoDoComando;
 module.exports.semImagem = semImagem;
+module.exports.recusaInofensiva = recusaInofensiva;
+module.exports.apontaParaOVazio = apontaParaOVazio;

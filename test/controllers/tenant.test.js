@@ -916,3 +916,48 @@ test("lista vazia de propósito PASSA — é a conta que não fotografa", async 
   assert.deepEqual(r.body.sides, []);
   assert.deepEqual(salvos, [[]]);
 });
+
+// ── O DOMÍNIO É DECISÃO DE MARCA: EXIGE `users.manage` (14/11/2026) ─────────
+//
+// *"meu medo é... alguém conseguir acessar dados de outros clientes"* — e um
+// vizinho desse medo é a INTEGRIDADE: as rotas de domínio eram só `verify`, de
+// modo que qualquer sessão autenticada (até a de um aluno) remontava ou
+// derrubava o endereço white-label da casa. As irmãs (tema, palavras, idioma)
+// sempre exigiram `users.manage`; estas quatro tinham escapado. O `can` barra
+// ANTES de a rota tocar em qualquer api — por isso o dublê não precisa de mais.
+function montaPortaoDominio({ permissoes = [] } = {}) {
+  const pedidas = [];
+  const app = fakeApp({
+    helpers: {
+      ReqProtected: {
+        async verify() {
+          return USER;
+        },
+        async can(req, res, permissao) {
+          pedidas.push(permissao);
+          if (!permissoes.includes(permissao)) {
+            res.status(403).send({ msg: "sem permissão", permission: permissao });
+            return false;
+          }
+          return USER;
+        },
+      },
+    },
+  });
+  TenantController(app);
+  return { app, pedidas };
+}
+
+for (const [metodo, rota, corpo] of [
+  ["post", "/me/tenant/domain", { subdomain: "qualquer" }],
+  ["post", "/me/tenant/custom-domain", { domain: "x.com.br" }],
+  ["post", "/me/tenant/custom-domain/verify", {}],
+  ["delete", "/me/tenant/custom-domain", {}],
+]) {
+  test(`${metodo.toUpperCase()} ${rota}: sem users.manage é 403`, async () => {
+    const { app, pedidas } = montaPortaoDominio({ permissoes: [] });
+    const r = await call(app, metodo, rota, { body: corpo });
+    assert.equal(r.status, 403, "um aluno logado não pode mexer no domínio");
+    assert.equal(pedidas.at(-1), "users.manage", "a porta pedida é a de marca");
+  });
+}

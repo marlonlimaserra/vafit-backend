@@ -109,6 +109,15 @@ test("só as collections combinadas têm TTL", () => {
     // A frequência que sai daí vira `checkins`, que NÃO tem prazo: o que
     // interessa ao dono sobrevive à faxina do que interessa a quem depura.
     "access_device_events",
+    // O DIÁRIO DOS AVISOS DO GATEWAY (19/10/2026): *"coloque 'log asaas' para
+    // a gente poder ver o que chegou, se foi processado ou não"*. Também é
+    // registro de DEPURAÇÃO — o que o Asaas mandou e o que foi feito.
+    //
+    // TRINTA dias, e não três como o do leitor: a pergunta aqui não é "o que
+    // houve ontem à noite", é "por que a mensalidade de outubro não baixou",
+    // e essa se faz fechando o mês. O dinheiro que sai daí vira `payments`,
+    // que não tem prazo nenhum.
+    "gateway_webhook_logs",
   ]);
 
   const achadas = new Set();

@@ -24,7 +24,7 @@ function fetchFalso(resposta, registro = {}) {
 const BASE = { apiKey: "re_teste", from: "nao-responda@gofitnow.fit", to: "pessoa@exemplo.com", subject: "Oi" };
 
 test("o remetente vai como 'Nome <endereço>', e só o endereço quando não há nome", () => {
-  assert.strictEqual(remetente("a@b.c", "GoFitNow"), "GoFitNow <a@b.c>");
+  assert.strictEqual(remetente("a@b.c", "VAFIT"), "VAFIT <a@b.c>");
   assert.strictEqual(remetente("a@b.c", ""), "a@b.c");
   assert.strictEqual(remetente("a@b.c", "  "), "a@b.c");
 });

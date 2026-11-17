@@ -1,0 +1,12 @@
+{
+  "connectedAccounts": {
+    "state": {
+      "ok": "Receiving",
+      "mute": "Not receiving events",
+      "expired": "Needs reconnecting",
+      "noPermission": "Permission revoked",
+      "unreachable": "Couldn't check",
+      "unchecked": "Not checked"
+    }
+  }
+}

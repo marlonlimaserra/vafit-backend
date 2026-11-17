@@ -346,6 +346,201 @@ module.exports = function (app) {
     res.send(resposta);
   });
 
+  // ── A MARCAÇÃO, num lugar só ───────────────────────────────────────────
+  //
+  // Duas portas chegam aqui: a página aberta (`POST /public/booking`, a pessoa
+  // pelo contato que ela digitou) e o app de quem já é cliente (`POST
+  // /my/booking`, a pessoa pela SESSÃO). O que protege a agenda — o recorte da
+  // página, o horário que vale, a vaga conferida de novo — é o MESMO para as
+  // duas, e por isso mora uma vez só.
+  //
+  // `pessoa`: `{ nome, email, telefone }` na página aberta; `{ studentId,
+  // contato }` no app. Roda DENTRO do contexto da instância de quem chama.
+  async function marcar(body, pessoa) {
+    const { nome = "", email = "", telefone = "" } = pessoa;
+
+    // A checagem que de fato protege: aqui é onde o horário vira compromisso.
+    const pagina = await paginaDoApelido(body.slug);
+    if (pagina === false) return { erro: "unavailable" };
+    if (pagina && !app.api.bookingPage.ofereceServico(pagina, body.service)) {
+      return { erro: "unavailable" };
+    }
+    if (pagina && !app.api.bookingPage.ofereceProfissional(pagina, body.professional)) {
+      return { erro: "unavailable" };
+    }
+
+    const grade = await app.api.availability.of(body.professional);
+    const horario = horarioQueVale(pagina, grade);
+    if (!horario) return { erro: "unavailable" };
+
+    const servico = await app.api.service.data(body.service);
+    if (!servico || !servico.active) return { erro: "unavailable" };
+
+    const inicio = new Date(body.date);
+    if (Number.isNaN(inicio.getTime())) return { erro: "unavailable" };
+
+    // A DISPONIBILIDADE É CONFERIDA DE NOVO, AQUI.
+    //
+    // A lista que o cliente viu tem segundos de idade, e nesse tempo outra
+    // pessoa pode ter marcado o mesmo horário. Confiar na tela seria deixar
+    // a última vaga ser vendida duas vezes.
+    //
+    // O DIA é o dia DE PAREDE do horário pedido, no fuso da conta — nunca a
+    // meia-noite UTC. `setHours(0,0,0,0)` num servidor em UTC devolvia a
+    // meia-noite UTC, que no Brasil ainda é a NOITE DO DIA ANTERIOR: a grade
+    // era gerada para sexta quando a pessoa marcava sábado, o horário nunca
+    // estava na lista, e TODA confirmação voltava "taken". O app de iPhone
+    // foi quem denunciou — a página web tinha o mesmo defeito adormecido.
+    const fuso = await app.api.tenant.timezoneOfInstance();
+    const parede = tempo.paredeDe(inicio, fuso);
+    const dia = tempo.instante(
+      { ano: parede.ano, mes: parede.mes, dia: parede.dia, hora: 0, minuto: 0 },
+      fuso
+    );
+    // A janela de OCUPADOS é maior que o dia de propósito: um compromisso que
+    // começa antes da meia-noite e atravessa, ou termina depois dela, também
+    // disputa vaga. Buscar folgado é barato; deixar de ver um conflito não é.
+    const ocupados = await app.api.appointment.between(
+      [body.professional],
+      new Date(dia.getTime() - 12 * 3600000),
+      new Date(dia.getTime() + 36 * 3600000)
+    );
+
+    const livres = slots.livresDoDia({
+      dia,
+      // O horário da página vale AQUI também — é aqui que o horário vira
+      // compromisso.
+      semana: horario.semana,
+      // Mesma conta da listagem — ver lá. As duas TÊM de concordar: com a
+      // listagem calculando por serviço e a marcação usando o passo fixo,
+      // bastaria mandar outra hora no corpo para marcar dentro do intervalo.
+      passo: horario.intervalo == null ? horario.passo : servico.minutes + horario.intervalo,
+      duracao: servico.minutes,
+      compromissos: ocupados,
+      bloqueios: horario.bloqueios,
+      serviceId: servico._id,
+      capacidade: servico.capacity,
+      agora: new Date(),
+      antecedenciaHoras: horario.antecedencia,
+      horizonteDias: horario.horizonte,
+      fuso,
+    });
+
+    const ainda = livres.some((l) => l.start.getTime() === inicio.getTime());
+    if (!ainda) return { erro: "taken" };
+
+    // A pessoa: a que já existe com este contato, ou uma nova.
+    //
+    // Reaproveitar pelo e-mail evita uma ficha nova a cada marcação — e é o
+    // que faz o histórico de quem já é cliente continuar sendo dele.
+    // ── OU A PESSOA LOGADA (16/11/2026) ────────────────────────────────
+    //
+    // Quem marca pelo APP já é alguém: o id vem da SESSÃO (`POST
+    // /my/booking`), e não de um e-mail digitado. Casar pelo e-mail servia à
+    // página aberta; para quem está logado ele é um palpite — e quem entrou
+    // pelo telefone, sem e-mail na ficha, viraria uma ficha NOVA a cada
+    // marcação.
+    const existente = pessoa.studentId
+      ? { _id: pessoa.studentId }
+      : email
+        ? await app.api.user.dataByEmail(email)
+        : undefined;
+
+    let studentId;
+    if (existente) {
+      studentId = existente._id;
+      // A pessoa já existe, mas talvez não com ESTE profissional. Sem o
+      // vínculo, o compromisso apareceria na agenda dele e a pessoa não
+      // apareceria na lista — e ele não conseguiria abrir a ficha dela.
+      await app.api.link.link(body.professional, studentId, "booking");
+    } else {
+      studentId = await app.api.user.insertStudent(body.professional, {
+        name: nome,
+        email: email || "",
+        phone: telefone,
+      });
+
+      // ── A FOTO DO WHATSAPP ──────────────────────────────────────────
+      //
+      // Este é o terceiro lugar que cria pessoa (os outros dois estão em
+      // `Student.js`), e o único em que o telefone é OBRIGATÓRIO — quem
+      // agenda por página pública digita o WhatsApp para receber a
+      // confirmação. Então é onde a foto acerta mais.
+      //
+      // FORA do caminho crítico, e aqui isso é mais importante que nas
+      // outras duas rotas: esta é PÚBLICA e é onde alguém decide se agenda.
+      // A busca tem dois `fetch` de 10s — no pior caso, vinte segundos somados
+      // a um "confirmar agendamento". Vinte segundos de espera é o
+      // agendamento perdido, e a foto que se ganharia não paga isso.
+      //
+      // `app.depois` é só de teste; em produção ele é undefined. Ver Portal.js.
+      (app.depois || depoisLib)(`foto do whatsapp de ${studentId}`, () =>
+        fotoDoWhatsapp.buscarParaPessoa(app, studentId, telefone)
+      );
+    }
+
+    const id = await app.api.appointment.insert(
+      body.professional,
+      studentId,
+      {
+        date: inicio,
+        minutes: servico.minutes,
+        service: servico._id,
+        title: servico.name,
+        note: String(body.note || "").trim().slice(0, 500),
+      },
+      body.professional
+    );
+
+    const criado = await app.api.appointment.data([body.professional], id);
+
+    // A cobrança automática vale aqui também: quem marcou um serviço com
+    // valor já sai devendo, como sairia se o profissional tivesse marcado.
+    if (servico.price) {
+      const jaExiste = await app.api.finance.chargeOfAppointment(id);
+      if (!jaExiste) {
+        await app.api.finance.insertCharge(
+          studentId,
+          {
+            amount: servico.price,
+            dueDate: inicio,
+            description: servico.name,
+            appointment: id,
+            service: servico._id,
+          },
+          body.professional,
+          await app.api.tenant.currencyFor(servico.currency)
+        );
+      }
+    }
+
+    // ── AVISAR QUEM ATENDE ──────────────────────────────────────────────
+    //
+    // A página pública é a única porta em que alguém marca SEM o profissional
+    // estar na frente. Sem aviso, a primeira notícia de um compromisso das
+    // 08:00 é abrir a agenda de manhã — ou a pessoa batendo na porta.
+    //
+    // ── DEPOIS de gravar, e sem segurar a resposta ──────────────────────
+    //
+    // Quem está esperando é o CLIENTE, na página pública, e o aviso não é
+    // dele. Esperar o OneSignal e o SMTP para responder "marcado" seria cobrar
+    // dele o tempo de um recado para outra pessoa — e transformaria um SMTP
+    // fora do ar em marcação que parece ter falhado depois de ter sido
+    // gravada.
+    //
+    // Por isso os dois avisos vão soltos, e o resultado da marcação é
+    // devolvido do mesmo jeito se eles falharem.
+    avisarQuemAtende({
+      profissionalId: body.professional,
+      studentId,
+      servico,
+      inicio,
+      contato: pessoa.contato || email || telefone || "",
+    });
+
+    return { ok: true, date: criado?.date, service: servico.name, minutes: servico.minutes };
+  }
+
   // A marcação.
   app.post("/public/booking", async function (req, res) {
     const instancia = await instanciaDoHost(req, res);
@@ -383,175 +578,122 @@ module.exports = function (app) {
       return;
     }
 
-    const resultado = await instanceContext.run(instancia, async () => {
-      // A checagem que de fato protege: aqui é onde o horário vira compromisso.
-      const pagina = await paginaDoApelido(body.slug);
-      if (pagina === false) return { erro: "unavailable" };
-      if (pagina && !app.api.bookingPage.ofereceServico(pagina, body.service)) {
-        return { erro: "unavailable" };
-      }
-      if (pagina && !app.api.bookingPage.ofereceProfissional(pagina, body.professional)) {
-        return { erro: "unavailable" };
-      }
-
-      const grade = await app.api.availability.of(body.professional);
-      const horario = horarioQueVale(pagina, grade);
-      if (!horario) return { erro: "unavailable" };
-
-      const servico = await app.api.service.data(body.service);
-      if (!servico || !servico.active) return { erro: "unavailable" };
-
-      const inicio = new Date(body.date);
-      if (Number.isNaN(inicio.getTime())) return { erro: "unavailable" };
-
-      // A DISPONIBILIDADE É CONFERIDA DE NOVO, AQUI.
-      //
-      // A lista que o cliente viu tem segundos de idade, e nesse tempo outra
-      // pessoa pode ter marcado o mesmo horário. Confiar na tela seria deixar
-      // a última vaga ser vendida duas vezes.
-      //
-      // O DIA é o dia DE PAREDE do horário pedido, no fuso da conta — nunca a
-      // meia-noite UTC. `setHours(0,0,0,0)` num servidor em UTC devolvia a
-      // meia-noite UTC, que no Brasil ainda é a NOITE DO DIA ANTERIOR: a grade
-      // era gerada para sexta quando a pessoa marcava sábado, o horário nunca
-      // estava na lista, e TODA confirmação voltava "taken". O app de iPhone
-      // foi quem denunciou — a página web tinha o mesmo defeito adormecido.
-      const fuso = await app.api.tenant.timezoneOfInstance();
-      const parede = tempo.paredeDe(inicio, fuso);
-      const dia = tempo.instante(
-        { ano: parede.ano, mes: parede.mes, dia: parede.dia, hora: 0, minuto: 0 },
-        fuso
-      );
-      // A janela de OCUPADOS é maior que o dia de propósito: um compromisso que
-      // começa antes da meia-noite e atravessa, ou termina depois dela, também
-      // disputa vaga. Buscar folgado é barato; deixar de ver um conflito não é.
-      const ocupados = await app.api.appointment.between(
-        [body.professional],
-        new Date(dia.getTime() - 12 * 3600000),
-        new Date(dia.getTime() + 36 * 3600000)
-      );
-
-      const livres = slots.livresDoDia({
-        dia,
-        // O horário da página vale AQUI também — é aqui que o horário vira
-        // compromisso.
-        semana: horario.semana,
-        // Mesma conta da listagem — ver lá. As duas TÊM de concordar: com a
-        // listagem calculando por serviço e a marcação usando o passo fixo,
-        // bastaria mandar outra hora no corpo para marcar dentro do intervalo.
-        passo: horario.intervalo == null ? horario.passo : servico.minutes + horario.intervalo,
-        duracao: servico.minutes,
-        compromissos: ocupados,
-        bloqueios: horario.bloqueios,
-        serviceId: servico._id,
-        capacidade: servico.capacity,
-        agora: new Date(),
-        antecedenciaHoras: horario.antecedencia,
-        horizonteDias: horario.horizonte,
-        fuso,
-      });
-
-      const ainda = livres.some((l) => l.start.getTime() === inicio.getTime());
-      if (!ainda) return { erro: "taken" };
-
-      // A pessoa: a que já existe com este contato, ou uma nova.
-      //
-      // Reaproveitar pelo e-mail evita uma ficha nova a cada marcação — e é o
-      // que faz o histórico de quem já é cliente continuar sendo dele.
-      const existente = email ? await app.api.user.dataByEmail(email) : undefined;
-
-      let studentId;
-      if (existente) {
-        studentId = existente._id;
-        // A pessoa já existe, mas talvez não com ESTE profissional. Sem o
-        // vínculo, o compromisso apareceria na agenda dele e a pessoa não
-        // apareceria na lista — e ele não conseguiria abrir a ficha dela.
-        await app.api.link.link(body.professional, studentId, "booking");
-      } else {
-        studentId = await app.api.user.insertStudent(body.professional, {
-          name: nome,
-          email: email || "",
-          phone: telefone,
-        });
-
-        // ── A FOTO DO WHATSAPP ──────────────────────────────────────────
-        //
-        // Este é o terceiro lugar que cria pessoa (os outros dois estão em
-        // `Student.js`), e o único em que o telefone é OBRIGATÓRIO — quem
-        // agenda por página pública digita o WhatsApp para receber a
-        // confirmação. Então é onde a foto acerta mais.
-        //
-        // FORA do caminho crítico, e aqui isso é mais importante que nas
-        // outras duas rotas: esta é PÚBLICA e é onde alguém decide se agenda.
-        // A busca tem dois `fetch` de 10s — no pior caso, vinte segundos somados
-        // a um "confirmar agendamento". Vinte segundos de espera é o
-        // agendamento perdido, e a foto que se ganharia não paga isso.
-        //
-        // `app.depois` é só de teste; em produção ele é undefined. Ver Portal.js.
-        (app.depois || depoisLib)(`foto do whatsapp de ${studentId}`, () =>
-          fotoDoWhatsapp.buscarParaPessoa(app, studentId, telefone)
-        );
-      }
-
-      const id = await app.api.appointment.insert(
-        body.professional,
-        studentId,
-        {
-          date: inicio,
-          minutes: servico.minutes,
-          service: servico._id,
-          title: servico.name,
-          note: String(body.note || "").trim().slice(0, 500),
-        },
-        body.professional
-      );
-
-      const criado = await app.api.appointment.data([body.professional], id);
-
-      // A cobrança automática vale aqui também: quem marcou um serviço com
-      // valor já sai devendo, como sairia se o profissional tivesse marcado.
-      if (servico.price) {
-        const jaExiste = await app.api.finance.chargeOfAppointment(id);
-        if (!jaExiste) {
-          await app.api.finance.insertCharge(
-            studentId,
-            {
-              amount: servico.price,
-              dueDate: inicio,
-              description: servico.name,
-              appointment: id,
-              service: servico._id,
-            },
-            body.professional,
-            await app.api.tenant.currencyFor(servico.currency)
-          );
-        }
-      }
-
-      // ── AVISAR QUEM ATENDE ──────────────────────────────────────────────
-      //
-      // A página pública é a única porta em que alguém marca SEM o profissional
-      // estar na frente. Sem aviso, a primeira notícia de um compromisso das
-      // 08:00 é abrir a agenda de manhã — ou a pessoa batendo na porta.
-      //
-      // ── DEPOIS de gravar, e sem segurar a resposta ──────────────────────
-      //
-      // Quem está esperando é o CLIENTE, na página pública, e o aviso não é
-      // dele. Esperar o OneSignal e o SMTP para responder "marcado" seria cobrar
-      // dele o tempo de um recado para outra pessoa — e transformaria um SMTP
-      // fora do ar em marcação que parece ter falhado depois de ter sido
-      // gravada.
-      //
-      // Por isso os dois avisos vão soltos, e o resultado da marcação é
-      // devolvido do mesmo jeito se eles falharem.
-      avisarQuemAtende({ profissionalId: body.professional, studentId, servico, inicio, contato: email || telefone || "" });
-
-      return { ok: true, date: criado?.date, service: servico.name, minutes: servico.minutes };
-    });
+    const resultado = await instanceContext.run(instancia, () =>
+      marcar(body, { nome, email, telefone })
+    );
 
     if (resultado.erro) {
       // 409 no horário tomado: é conflito de estado, e a tela reage a ele
       // recarregando os horários em vez de mostrar "erro".
+      res.status(resultado.erro === "taken" ? 409 : 400).send({ msg: resultado.erro });
+      return;
+    }
+
+    res.status(201).send(resultado);
+  });
+
+  // ── O APP DE QUEM JÁ É CLIENTE (16/11/2026) ─────────────────────────────
+  //
+  // *"em marcar horário acho que não está feito: eu clico e fica 'o que você
+  // quer marcar' e aí não aparece mais nada"*. A tela do app pedia a agenda
+  // pública SEM página — a de "quem tem grade ligada" — e a grade por
+  // profissional saiu da tela há tempo: ninguém a tem ligada, e a resposta
+  // vinha vazia. As agendas de verdade hoje são as PÁGINAS.
+  //
+  // Duas rotas, com SESSÃO:
+  //   GET  /my/booking  → as agendas que têm o que oferecer
+  //   POST /my/booking  → marcar, com a pessoa da SESSÃO (ver `marcar`)
+  //
+  // Os serviços, quem atende e os horários continuam vindo das rotas públicas
+  // com o apelido escolhido: o recorte de cada página é o mesmo para quem
+  // chega pelo link e para quem chega pelo app.
+  //
+  // O portão é o de controllers/My.js: quem é cliente, ou o profissional que
+  // também É acompanhado por alguém.
+  async function atendido(req, res) {
+    const user = await app.helpers.ReqProtected.verify(req, res);
+    if (user === false) return false;
+    if (user.type === "student") return user;
+
+    const acompanhado = await app.api.link.countProfessionalsOf(user._id);
+    if (!acompanhado) {
+      res.status(403).send({ msg: req.t("errors.studentAreaOnly") });
+      return false;
+    }
+    return user;
+  }
+
+  app.get("/my/booking", async function (req, res) {
+    const eu = await atendido(req, res);
+    if (eu === false) return;
+
+    const servicos = await app.api.service.list({ apenasAtivos: true });
+    const temServico = (pagina) =>
+      servicos.some((s) => app.api.bookingPage.ofereceServico(pagina, s._id));
+
+    // As páginas ATIVAS que têm o que marcar: ao menos um serviço no recorte
+    // e alguém que atenda. Página sem nada disso seria uma porta para a
+    // mesma tela vazia que motivou esta rota.
+    const paginas = (await app.api.bookingPage.list()).filter((p) => Number(p.active) === 1);
+    const abertas = [];
+    const ids = new Set();
+    for (const pagina of paginas) {
+      if (!temServico(pagina)) continue;
+      const quem = await quemAtende(pagina);
+      if (!quem.length) continue;
+      quem.forEach((p) => ids.add(String(p._id)));
+      abertas.push({ slug: pagina.slug, name: pagina.name, intro: pagina.intro || "" });
+    }
+
+    // A agenda de sempre (sem apelido) só quando não há página nenhuma no ar:
+    // com páginas, ela é o resto de quando havia uma agenda só.
+    let semPagina = false;
+    if (!abertas.length && servicos.length) {
+      const quem = await quemAtende(null);
+      if (quem.length) {
+        semPagina = true;
+        quem.forEach((p) => ids.add(String(p._id)));
+      }
+    }
+
+    // As FOTOS de quem atende. Quem pergunta está logado e é cliente da casa,
+    // e `/avatars/:id` já mostra a foto de qualquer conta da casa a quem está
+    // logado: o interruptor da página (`showProfessional`) é sobre a página
+    // ABERTA a desconhecidos, e não muda o que um cliente já vê.
+    const fichas = await app.api.user.briefByIds([...ids]);
+    const fotos = Object.fromEntries(
+      Object.entries(fichas).map(([id, f]) => [id, f.avatarAt || null])
+    );
+
+    res.send({ pages: abertas, default: semPagina, photos: fotos });
+  });
+
+  app.post("/my/booking", async function (req, res) {
+    const eu = await atendido(req, res);
+    if (eu === false) return;
+
+    // O mesmo teto da página aberta, mas por CONTA e não por IP: quem está
+    // logado tem nome, e a rede do estúdio é dividida por todo mundo nela.
+    const limite = await rateLimit.checkShared(`booking:user:${eu._id}`, 10);
+    if (!limite.allowed) {
+      res.setHeader("Retry-After", limite.retryAfter);
+      res.status(429).send({ msg: "tooMany" });
+      return;
+    }
+
+    const body = req.body || {};
+    const resultado = await marcar(
+      {
+        slug: body.slug,
+        service: body.service,
+        professional: body.professional,
+        date: body.date,
+        note: body.note,
+      },
+      { studentId: eu._id, contato: eu.email || eu.phone || "" }
+    );
+
+    if (resultado.erro) {
       res.status(resultado.erro === "taken" ? 409 : 400).send({ msg: resultado.erro });
       return;
     }

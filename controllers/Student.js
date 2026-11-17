@@ -182,20 +182,33 @@ module.exports = function (app) {
     const trainer = await app.helpers.ReqProtected.can(req, res, "people.view");
     if (trainer === false) return;
 
-    // As geradas vão junto, com o rótulo já traduzido — ver `dinamicas` em
-    // `lib/condicoes/`. É aqui que `req.t` existe, e é por isso que o rótulo
-    // de um campo NATIVO (que guarda uma chave de i18n, não um nome) sai
-    // resolvido daqui em vez de a tela precisar conhecê-lo.
-    const geradas = await condicoes.dinamicas(app, req.t.bind(req));
+    // ── O TEXTO SAI DAQUI PRONTO ────────────────────────────────────────
+    //
+    // Nome da condição, nome da categoria, nome de cada operador e as palavras
+    // do sim/não: tudo já no idioma de quem pediu. A tela não tem mais chave
+    // de tradução de condição nenhuma.
+    //
+    // *"no app o filtro avançado ficou todo bugado"* (10/10/2026): o app
+    // instalado conhecia as condições de uma hora antes e escrevia a chave
+    // crua das dezesseis novas. Enquanto o catálogo fosse do servidor e o
+    // rótulo do cliente, toda condição nova ia nascer assim — e no app só
+    // ficaria boa depois de recompilar e reinstalar. Ver `catalogo()`.
+    const t = req.t.bind(req);
+    const geradas = await condicoes.dinamicas(app, t);
 
-    res.send({ categorias: condicoes.CATEGORIAS, condicoes: condicoes.catalogo(geradas) });
+    res.send({ categorias: condicoes.categorias(t), condicoes: condicoes.catalogo(geradas, t) });
   });
 
   app.get("/people/summary", async function (req, res) {
     const trainer = await app.helpers.ReqProtected.can(req, res, "people.view");
     if (trainer === false) return;
 
-    res.send(await app.api.user.studentsSummary(trainer._id));
+    // A LENTE vale aqui também (20/10/2026). Esta rota é a mesma conta que o
+    // painel mostra, e ela é pública na documentação da API: uma versão que
+    // ignora a unidade devolveria a casa inteira para quem pedisse por uma.
+    res.send(
+      await app.api.user.studentsSummary(trainer._id, lenteDeUnidade.recorte(trainer, req.query.unit))
+    );
   });
 
   // ── A LINHA DO TEMPO DA PESSOA ─────────────────────────────────────────
@@ -806,6 +819,10 @@ module.exports = function (app) {
 
     await app.api.user.deleteStudent(trainer._id, req.params.id);
     await app.api.auth.deleteAllTokensByUser(req.params.id);
+    // Os CARTÕES guardados saem junto. Um token de cobrança vivo de alguém
+    // que não existe mais é uma credencial sem dono — e ela continuaria
+    // valendo na conta do Asaas da casa.
+    await app.api.cartaoSalvo.apagarDaPessoa(req.params.id);
 
     app.insertUserActionHistory(req, trainer, "delete_person", {
       category: "people",

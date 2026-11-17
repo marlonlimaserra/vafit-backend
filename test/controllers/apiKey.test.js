@@ -10,16 +10,17 @@ const { execSync } = require("node:child_process");
 
 const USER = { _id: "u1", name: "Marlon", permissions: ["people.view"] };
 
-function monta({ viaApiKey = false, ativas = 0, chave } = {}) {
+function monta({ viaApiKey = false, ativas = 0, chave, quem = USER } = {}) {
   const criadas = [];
   const revogadas = [];
+  const escopos = [];
 
   const app = fakeApp({
     helpers: {
       ReqProtected: {
         async verify(req) {
           req._viaApiKey = viaApiKey;
-          return USER;
+          return quem;
         },
       },
     },
@@ -43,6 +44,10 @@ function monta({ viaApiKey = false, ativas = 0, chave } = {}) {
           revogadas.push(id);
           return true;
         },
+        async setFerramentas(userId, id, ferramentas, nivel) {
+          escopos.push({ id, ferramentas, nivel });
+          return true;
+        },
         filter: (d) => {
           const { hash, ...rest } = d;
           return rest;
@@ -60,7 +65,7 @@ function monta({ viaApiKey = false, ativas = 0, chave } = {}) {
   });
 
   ApiKeyController(app);
-  return { app, criadas, revogadas };
+  return { app, criadas, revogadas, escopos };
 }
 
 test("listar devolve as chaves, o teto e o limite por minuto", async () => {
@@ -314,4 +319,151 @@ test("cada rota documentada traz método, caminho, resumo e permissão", async (
       }
     }
   }
+});
+
+// ── AS FERRAMENTAS QUE A CHAVE ALCANÇA (08/11/2026) ─────────────────────
+//
+// *"no SprintHub a gente escolhe quais ferramentas vão estar disponíveis"*.
+//
+// A chave sempre agiu COMO a pessoa — mesmas permissões, nem mais nem menos.
+// O que faltava era estreitar: a mesma pessoa tem o assistente de dentro do
+// produto, o Claude Desktop e uma automação de cobrança, e as três não
+// precisam do mesmo poder.
+
+test("o catálogo de ferramentas tem rota PRÓPRIA, fora da lista de chaves", async () => {
+  // Fora porque são 83 linhas que só mudam com deploy, enquanto a lista de
+  // chaves é recarregada a cada criar e revogar.
+  const { app } = monta();
+  const r = await call(app, "get", "/api-keys/tools");
+
+  assert.equal(r.status, 200);
+  assert.equal(r.body.rows.length, 83);
+  assert.ok(r.body.rows.every((f) => f.nome && f.grupo && f.permissao));
+  // O que a conta alcança, para a tela marcar o que está fora em vez de deixar
+  // escolher uma ferramenta que nunca responderia.
+  assert.deepEqual(r.body.permissions, USER.permissions);
+});
+
+test("a listagem diz quantas ferramentas existem, sem baixar o catálogo", async () => {
+  const { app } = monta();
+  const r = await call(app, "get", "/api-keys");
+
+  assert.equal(r.body.totalFerramentas, 83);
+  assert.equal(r.body.rows[0].ferramentas, undefined, "a lista não carrega o catálogo");
+});
+
+test("gravar o escopo guarda só os nomes que existem", async () => {
+  const { app, escopos } = monta({ chave: { _id: "k1", name: "Integração", prefix: "abcd1234" } });
+
+  const r = await call(app, "put", "/api-keys/k1/tools", {
+    body: { ferramentas: ["pessoa_buscar", "voar", "pessoa_buscar"] },
+  });
+
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.ferramentas, ["pessoa_buscar"]);
+  assert.deepEqual(escopos[0].ferramentas, ["pessoa_buscar"]);
+});
+
+test("a chave de API NÃO edita o próprio escopo", async () => {
+  // Pelo mesmo motivo de não criar nem revogar: uma chave que edita o próprio
+  // alcance é uma chave sem alcance definido. Quem vazasse uma estreita se
+  // devolveria as 83 numa chamada, e a revogação viraria corrida.
+  const { app, escopos } = monta({
+    viaApiKey: true,
+    chave: { _id: "k1", name: "Integração", prefix: "abcd1234" },
+  });
+
+  const r = await call(app, "put", "/api-keys/k1/tools", { body: { ferramentas: [] } });
+
+  assert.equal(r.status, 403);
+  assert.equal(r.body.code, "api_key_cannot_manage");
+  assert.deepEqual(escopos, []);
+});
+
+test("escopo de chave revogada não se edita", async () => {
+  const { app } = monta({
+    chave: { _id: "k1", name: "Integração", prefix: "abcd1234", revokedAt: new Date() },
+  });
+
+  const r = await call(app, "put", "/api-keys/k1/tools", { body: { ferramentas: [] } });
+  assert.equal(r.status, 400);
+});
+
+test("escopo de chave que não é da pessoa dá 404", async () => {
+  // `data()` já filtra por dono; o caso existe para que trocá-lo por uma busca
+  // só por id apareça aqui, e não em produção.
+  const { app } = monta({ chave: undefined });
+
+  const r = await call(app, "put", "/api-keys/k9/tools", { body: { ferramentas: [] } });
+  assert.equal(r.status, 404);
+});
+
+test("criar chave já aceita o escopo", async () => {
+  const { app, criadas } = monta();
+
+  const r = await call(app, "post", "/api-keys", {
+    body: { name: "Cobrança", ferramentas: ["cobranca_criar"] },
+  });
+
+  assert.equal(r.status, 200);
+  assert.equal(criadas.length, 1);
+});
+
+test("a listagem traz o ENDEREÇO que um cliente MCP de fora cola", async () => {
+  // Montado no servidor porque metade dele a tela não sabe: o endereço da API
+  // sai de BASE_DOMAIN e a instância sai do contexto. A tela só conhece o
+  // próprio host, que é o do painel.
+  const { app } = monta();
+  const r = await call(app, "get", "/api-keys", { instance: "marlon" });
+
+  assert.match(r.body.mcpUrl, /\/mcp\?instance=marlon$/);
+  assert.ok(r.body.mcpUrl.startsWith("https://"));
+});
+
+test("o catálogo diz o NÍVEL de cada ferramenta e a escada inteira", async () => {
+  const { app } = monta();
+  const r = await call(app, "get", "/api-keys/tools");
+
+  assert.deepEqual(r.body.niveis, ["ler", "escrever", "apagar"]);
+  assert.ok(r.body.rows.every((f) => ["ler", "escrever", "apagar"].includes(f.nivel)));
+});
+
+test("gravar o escopo grava o nível junto", async () => {
+  const { app, escopos } = monta({ chave: { _id: "k1", name: "Integração", prefix: "abcd1234" } });
+
+  const r = await call(app, "put", "/api-keys/k1/tools", {
+    body: { ferramentas: ["pessoa_buscar"], nivel: "escrever" },
+  });
+
+  assert.equal(r.status, 200);
+  assert.equal(r.body.nivel, "escrever");
+  assert.equal(escopos[0].nivel, "escrever");
+});
+
+test("nível inventado vira `apagar`, e não trava a gravação", async () => {
+  const { app, escopos } = monta({ chave: { _id: "k1", name: "Integração", prefix: "abcd1234" } });
+
+  await call(app, "put", "/api-keys/k1/tools", {
+    body: { ferramentas: ["pessoa_buscar"], nivel: "voar" },
+  });
+
+  assert.equal(escopos[0].nivel, "apagar");
+});
+
+// "O aluno consegue mexer no sistema?" (16/11/2026). Uma conta de CLIENTE
+// criava chave de API — e gastava o teto de chaves do plano da casa.
+test("quem é atendido não lista, não cria e não revoga chave", async () => {
+  const aluno = { _id: "a1", name: "Rafael", type: "student", permissions: [] };
+  const { app, criadas, revogadas } = monta({ quem: aluno });
+
+  const lista = await call(app, "get", "/api-keys");
+  const cria = await call(app, "post", "/api-keys", { body: { name: "Minha chave" } });
+  const revoga = await call(app, "delete", "/api-keys/k1");
+
+  assert.equal(lista.status, 403);
+  assert.equal(cria.status, 403);
+  assert.equal(cria.body.code, "student_no_api_keys");
+  assert.equal(revoga.status, 403);
+  assert.equal(criadas.length, 0);
+  assert.equal(revogadas.length, 0);
 });

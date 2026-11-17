@@ -2,6 +2,8 @@
   "errors": {
     "departmentNoName": "El departamento necesita un nombre",
     "departmentNotFound": "Departamento no encontrado",
-    "departmentTaken": "Ya existe un departamento con ese nombre"
+    "departmentTaken": "Ya existe un departamento con ese nombre",
+    "tabNoName": "La pestaña necesita un nombre",
+    "tabNotFound": "Pestaña no encontrada"
   }
 }

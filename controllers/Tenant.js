@@ -306,7 +306,10 @@ module.exports = function (app) {
   });
 
   app.post("/me/tenant/domain", async function (req, res) {
-    const user = await app.helpers.ReqProtected.verify(req, res);
+    // Trocar o domínio é decisão de marca — a MESMA porta de tema/palavras/idioma
+    // (`users.manage`), e não só "estar logado". Sem isto, qualquer sessão (até a
+    // de um aluno) remontava ou derrubava o endereço white-label da casa.
+    const user = await app.helpers.ReqProtected.can(req, res, "users.manage");
     if (user === false) return;
 
     // Uma chave de API não escolhe domínio: é decisão de marca, e o dono está
@@ -391,7 +394,8 @@ module.exports = function (app) {
   }
 
   app.post("/me/tenant/custom-domain", async function (req, res) {
-    const user = await app.helpers.ReqProtected.verify(req, res);
+    // Domínio próprio é marca: `users.manage`, como as irmãs. Ver /me/tenant/domain.
+    const user = await app.helpers.ReqProtected.can(req, res, "users.manage");
     if (user === false) return;
 
     if (req._viaApiKey) {
@@ -401,7 +405,7 @@ module.exports = function (app) {
 
     // ── DOMÍNIO PRÓPRIO É WHITELABEL ──────────────────────────────────────
     //
-    // É a parte do "esconder tudo da GoFitNow" que tem porta no servidor: o
+    // É a parte do "esconder tudo da VAFIT" que tem porta no servidor: o
     // subdomínio `cliente.gofitnow.fit` continua valendo para todo mundo, e o
     // endereço da casa do cliente é o que se vende.
     //
@@ -466,7 +470,8 @@ module.exports = function (app) {
   // Conferir de novo, a pedido. É a rota que a pessoa aperta depois de mexer no
   // DNS dela — esperar a próxima visita à tela seria pior.
   app.post("/me/tenant/custom-domain/verify", async function (req, res) {
-    const user = await app.helpers.ReqProtected.verify(req, res);
+    // Parte da gestão de domínio próprio: mesma porta das demais.
+    const user = await app.helpers.ReqProtected.can(req, res, "users.manage");
     if (user === false) return;
 
     // O documento é o da CASA (um por instância). Antes era o de quem
@@ -494,7 +499,8 @@ module.exports = function (app) {
   });
 
   app.delete("/me/tenant/custom-domain", async function (req, res) {
-    const user = await app.helpers.ReqProtected.verify(req, res);
+    // Apagar o domínio próprio derruba o site white-label: `users.manage`.
+    const user = await app.helpers.ReqProtected.can(req, res, "users.manage");
     if (user === false) return;
 
     if (req._viaApiKey) {

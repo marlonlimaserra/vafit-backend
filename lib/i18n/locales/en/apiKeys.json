@@ -1,7 +1,9 @@
 {
   "errors": {
     "apiKeyCannotManage": "An API key cannot create or revoke keys. Sign in to the app for that.",
+    "apiKeyLevelTooLow": "This key is level \"{{nivel}}\" and cannot perform this action.",
     "apiKeyNotFound": "Key not found.",
+    "apiKeyRevoked": "This key has been revoked.",
     "invalidApiKey": "Invalid or revoked API key.",
     "noApiKey": "No API key provided."
   }

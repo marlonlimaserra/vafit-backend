@@ -96,6 +96,9 @@ function monta({ equipe = true, existente, servico, cobrancaExistente, criado } 
         async chargeOfAppointment() {
           return cobrancaExistente;
         },
+        async cobrancasDosCompromissos() {
+          return {};
+        },
         async insertCharge(studentId, obj, createdBy, currency) {
           chamadas.cobrancas.push({
             ...obj,

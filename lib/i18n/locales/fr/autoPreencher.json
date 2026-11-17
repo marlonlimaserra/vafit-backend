@@ -9,6 +9,10 @@
         "title": {
           "hint": "Ex. : Entraînement, Consultation",
           "label": "Type de rendez-vous"
+        },
+        "minutes": {
+          "label": "Durée du rendez-vous (min)",
+          "hint": "Ex. : 50"
         }
       },
       "assessment": {

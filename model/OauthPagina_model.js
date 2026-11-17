@@ -240,6 +240,104 @@ OauthPagina_model.prototype.desassinarWebhook = async function (conta, chaves) {
   return { ok: r.ok };
 };
 
+// ── A CONTA AINDA FALA COM A GENTE? ──────────────────────────────────────
+//
+// *"coloque um 'badge' de status, que vai no backend e consulta se o token
+// ainda está funcionando"* (15/10/2026).
+//
+// Duas perguntas numa ida só, porque as duas falham sozinhas:
+//
+//   1. o TOKEN ainda vale — a pessoa pode ter trocado a senha, tirado o app
+//      nas configurações dela ou deixado de administrar a Página;
+//   2. a Página ainda está ASSINADA no nosso webhook — alguém pode ter
+//      removido o app da Página sem mexer em token nenhum, e aí tudo parece
+//      certo e nada chega.
+//
+// Só a primeira daria um selo verde numa Página muda, que é o pior resultado
+// possível: o selo existe para evitar exatamente essa surpresa.
+//
+// Devolve também o que a Meta contou de novo (nome, @ e foto): aproveitar a
+// mesma ida é o que mantém a lista atualizada sem uma segunda chamada — e é
+// o que CONSERTA a foto das contas ligadas antes de 15/10, sem ninguém
+// precisar reconectar.
+const TEMPO_LIMITE = 8000;
+
+// O que o Graph diz quando o token morreu. 190 é "access token inválido";
+// 102 é sessão expirada. 10 e 200 são permissão — caso diferente, porque
+// reconectar resolve um e trocar o papel da pessoa resolve o outro.
+function estadoDoErro(corpo, status) {
+  const codigo = Number(corpo?.error?.code);
+  const tipo = String(corpo?.error?.type || "");
+
+  if (codigo === 190 || codigo === 102 || status === 401) return "expirada";
+  if (codigo === 10 || codigo === 200 || codigo === 3) return "sem_permissao";
+  // OAuthException sem código conhecido ainda é problema de autorização, e
+  // mandar reconectar é o conselho certo.
+  if (tipo === "OAuthException") return "expirada";
+  return "fora_do_ar";
+}
+
+OauthPagina_model.prototype.conferir = async function (conta, chaves) {
+  const chamar = this.app.facebookFetch || fetch;
+  const token = String(conta?.token || "");
+  // Sem token guardado não há o que perguntar — e isto não é a rede falhando.
+  if (!token) return { estado: "expirada", detalhe: "sem token" };
+
+  const versao = this.versao(chaves);
+  const prova = this.provaDoSegredo(token, chaves.clientSecret);
+
+  try {
+    const p = new URLSearchParams({
+      fields: "id,name,username,picture{url}",
+      access_token: token,
+      appsecret_proof: prova,
+    });
+
+    const r = await chamar(`${GRAPH}/${versao}/${conta.externalId}?${p.toString()}`, {
+      signal: AbortSignal.timeout(TEMPO_LIMITE),
+    });
+
+    const corpo = await r.json().catch(() => null);
+    if (!r.ok) {
+      return {
+        estado: estadoDoErro(corpo, r.status),
+        detalhe: String(corpo?.error?.message || `graph_${r.status}`).slice(0, 200),
+      };
+    }
+
+    const fresco = {
+      nome: String(corpo?.name || ""),
+      usuario: String(corpo?.username || ""),
+      foto: String(corpo?.picture?.data?.url || ""),
+    };
+
+    // ── A SEGUNDA PERGUNTA ─────────────────────────────────────────────
+    //
+    // Falhar AQUI não derruba o resultado para vermelho: o token já se provou
+    // bom na pergunta de cima. Sem saber da assinatura, o selo fica no que
+    // sabia antes (`assinada` volta `undefined`, e o modelo não a reescreve).
+    const a = new URLSearchParams({ access_token: token, appsecret_proof: prova });
+    const rs = await chamar(`${GRAPH}/${versao}/${conta.externalId}/subscribed_apps?${a.toString()}`, {
+      signal: AbortSignal.timeout(TEMPO_LIMITE),
+    });
+
+    if (!rs.ok) return { estado: "ok", ...fresco };
+
+    const lista = await rs.json().catch(() => null);
+    const apps = Array.isArray(lista?.data) ? lista.data : [];
+    // Pelo ID DO NOSSO APP quando o conhecemos: a Página pode estar assinada
+    // por outro app, e contar linha seria dizer que a mensagem chega aqui.
+    const assinada = chaves.clientId
+      ? apps.some((a2) => String(a2.id) === String(chaves.clientId))
+      : apps.length > 0;
+
+    return { estado: assinada ? "ok" : "muda", assinada, ...fresco };
+  } catch (erro) {
+    // Tempo esgotado, DNS, rede. Nunca vermelho: ver `lib/estadoDaConta.js`.
+    return { estado: "fora_do_ar", detalhe: String(erro?.message || "").slice(0, 200) };
+  }
+};
+
 OauthPagina_model.prototype.contasDoCodigo = async function (code, chaves) {
   const resposta = await this.trocarCodigo(code, chaves);
   if (!resposta?.access_token) return { erro: "sem_access_token" };

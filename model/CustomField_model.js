@@ -127,6 +127,39 @@ const NATIVOS = [
   { alias: "height", tipo: "numero", rotuloPadrao: "customFields.native.height", ordem: 30 },
 ];
 
+// ── OS CAMPOS QUE A COBRANÇA VAI PEDIR ──────────────────────────────────
+//
+// *"quando a gente habilitar isso [o gateway], vamos precisar de endereço da
+// pessoa, CPF... acho que é melhor, por padrão, já vir um grupo chamado
+// endereços em todas as instâncias"* (14/10/2026).
+//
+// Semeados ANTES de existir cobrança, e de propósito: o endereço é o dado que
+// a recepção junta uma pessoa por vez, ao longo de meses. Pedi-lo no dia em
+// que o gateway for ligado é descobrir que ninguém tem.
+//
+// Eles NÃO são nativos: o valor mora em `customFields.<alias>` como o de
+// qualquer campo criado pela casa, e por isso podem ser renomeados,
+// reordenados, desligados e apagados. Nativo é só o que tem coluna própria
+// porque alguma conta lê de lá — endereço não tem.
+//
+// ── O CPF É IDENTIDADE, NÃO ENDEREÇO, e nasce DESLIGADO ────────────────
+//
+// Fica no `principal`, onde moram os dados da pessoa, e com `ativo: false`:
+// está no catálogo para a casa ligar num clique quando for cobrar, e fora da
+// ficha de quem nunca vai cobrar. O tipo `cpf` já existe, com máscara e
+// conferência de dígito — seria desperdício semear um `texto`, e tipo não se
+// troca depois.
+const COBRANCA = [
+  { alias: "cpf", tipo: "cpf", grupo: "principal", ordem: 40, ativo: false, noCadastro: false },
+  { alias: "cep", tipo: "cep", grupo: "endereco", ordem: 10 },
+  { alias: "logradouro", tipo: "texto", grupo: "endereco", ordem: 20 },
+  { alias: "numero", tipo: "texto", grupo: "endereco", ordem: 30 },
+  { alias: "complemento", tipo: "texto", grupo: "endereco", ordem: 40 },
+  { alias: "bairro", tipo: "texto", grupo: "endereco", ordem: 50 },
+  { alias: "cidade", tipo: "texto", grupo: "endereco", ordem: 60 },
+  { alias: "estado", tipo: "estado", grupo: "endereco", ordem: 70 },
+];
+
 const CAMPOS = {
   name: (v) => String(v || "").trim().slice(0, 80),
   tipo: (v) => tipos.normalizar(v),
@@ -295,9 +328,36 @@ CustomField_model.prototype.remove = async function (id) {
 // liberados. Idempotente por `alias`: um segundo boot não toca no que já está
 // lá, e é isso que deixa a casa renomear "Objetivo" para "Meta" sem o deploy
 // seguinte desfazer.
-CustomField_model.prototype.semear = async function () {
+//
+// `gruposNovos` são as gavetas que NASCERAM neste boot (ver
+// `CustomFieldGroup_model.semear`). Os campos de cobrança entram só quando a
+// gaveta `endereco` aparece — uma vez na vida da instância. Guardá-los por
+// alias, como os nativos, faria um campo apagado pela casa voltar no boot
+// seguinte; e nativo não tem esse problema porque nativo não se apaga.
+CustomField_model.prototype.semear = async function ({ gruposNovos = [] } = {}) {
   const col = await this.collection();
   const existentes = new Set((await col.find({}, { projection: { alias: 1 } }).toArray()).map((c) => c.alias));
+
+  const deCobranca = gruposNovos.includes("endereco")
+    ? COBRANCA.filter((c) => !existentes.has(c.alias)).map((c) => ({
+        name: "",
+        rotuloPadrao: `customFields.seed.${c.alias}`,
+        alias: c.alias,
+        tipo: c.tipo,
+        nativo: false,
+        grupo: c.grupo,
+        obrigatorio: false,
+        unico: false,
+        noCadastro: c.noCadastro !== false,
+        valorPadrao: "",
+        ajuda: "",
+        opcoes: [],
+        ordem: c.ordem,
+        ativo: c.ativo !== false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }))
+    : [];
 
   const novos = NATIVOS.filter((n) => !existentes.has(n.alias)).map((n) => ({
     // Sem `name`: quem lê resolve pelo `rotuloPadrao`, no idioma de quem abre.
@@ -319,10 +379,11 @@ CustomField_model.prototype.semear = async function () {
     updatedAt: new Date(),
   }));
 
-  if (!novos.length) return { criados: 0 };
+  const tudo = [...novos, ...deCobranca];
+  if (!tudo.length) return { criados: 0 };
 
-  await col.insertMany(novos);
-  return { criados: novos.length };
+  await col.insertMany(tudo);
+  return { criados: tudo.length };
 };
 
 // Os números do topo da tela. Contados no banco, e não na página: a lista
